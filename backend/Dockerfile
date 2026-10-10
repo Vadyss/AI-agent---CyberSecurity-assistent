@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY alembic.ini ./
 COPY storage/ ./storage/
+COPY identity/ ./identity/
 COPY orchestrator/ ./orchestrator/
 COPY gatekeeper/ ./gatekeeper/
 COPY examiner/ ./examiner/
