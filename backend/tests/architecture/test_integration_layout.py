@@ -50,3 +50,23 @@ def test_backend_image_contains_every_runtime_package():
     assert packages, "No backend packages found."
     for package in packages:
         assert f"COPY {package}/ ./{package}/" in dockerfile, package
+
+
+def test_lock_files_pin_exactly_the_declared_versions():
+    import re
+    for folder in ("backend", "sandbox"):
+        declared = {}
+        for line in (ROOT / folder / "requirements.txt").read_text().splitlines():
+            match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?==([^\s;]+)", line.strip())
+            if match:
+                declared[match.group(1).lower().replace("_", "-")] = match.group(2)
+        lock = (ROOT / folder / "requirements.lock").read_text()
+        locked = {m.group(1).lower().replace("_", "-"): m.group(2)
+                  for m in re.finditer(r"^([A-Za-z0-9_.-]+)==(\S+) \\$", lock, re.M)}
+        assert declared, folder
+        for name, version in declared.items():
+            assert locked.get(name) == version, (folder, name, version, locked.get(name))
+        assert lock.count("--hash=sha256:") >= len(locked), folder
+    for dockerfile in ("backend/Dockerfile", "sandbox/Dockerfile"):
+        text = (ROOT / dockerfile).read_text()
+        assert "--require-hashes" in text and "@sha256:" in text, dockerfile

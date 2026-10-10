@@ -91,7 +91,10 @@ services:
         condition: service_healthy
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: "${APP_VERSION:-dev}"
     # Not published: only oauth2-proxy (and the frontend's nginx) reach it.
     restart: unless-stopped
     environment:

@@ -119,3 +119,9 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Metrics:** Prometheus metrics (requests, latency, runs by outcome and duration, model calls, tokens and known cost, sandbox executions, queue depth) are served on `METRICS_PORT` (9100) inside the Docker network only. Labels never contain tenant IDs, run IDs or user data, which keeps cardinality bounded and tenant activity private.
 - **Health:** `/health` is a cheap liveness check for Docker. `/ready` checks the database, the schema revision, the sandbox and the identity provider's keys, and answers `503` with the failing component, for load balancers and monitoring.
 - **Trade-off:** No log shipping, dashboards or alert rules are deployed by default; an operator connects their own (see the operations guide).
+
+## D-018 Reproducible, minimal images
+
+- **Decision:** Backend and sandbox images are multi-stage builds on `python:3.12.15-slim` pinned by digest. Dependencies are installed from `requirements.lock` files that pin every transitive package with SHA-256 hashes (`pip install --require-hashes`), into a virtual environment that is copied into the runtime stage without pip. The backend runs as UID 10001; its code is owned by root and the root file system is read-only.
+- **Why:** Hash-pinned installs stop a compromised or re-published package version from entering an image. Pinning the base image by digest makes builds repeatable and makes base-image updates deliberate, reviewed changes.
+- **Updating:** Edit `requirements.txt`, then regenerate the lock with `pip-compile --generate-hashes --strip-extras --allow-unsafe --no-header` in the same base image (see the operations guide). A test fails when the lock and `requirements.txt` disagree.
