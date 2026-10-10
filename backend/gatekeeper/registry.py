@@ -269,6 +269,20 @@ class Registry:
                 raise IntegrityError("The candidate belongs to another run.")
             return self._read_verified(folder, meta, run_id, name)
 
+    def review(self, run_id: str | None, name: str) -> dict:
+        """Code, tests and manifest of an installed skill or a run's candidate, integrity-checked."""
+        code, manifest, meta = self.read_skill(run_id, name)
+        with self.lock:
+            folder = self._folder(name) if name in self.index["skills"] else self._candidate_path(run_id, name)
+            tests = safe_join(folder, "test_skill.py").read_bytes()
+        if sha256(tests) != meta["tests_sha256"]:
+            self._integrity(run_id, name, "The tests changed after they were verified.")
+            raise IntegrityError("Skill integrity has been compromised.")
+        return {"name": name, "version": meta["version"], "kind": meta["kind"], "origin": meta["origin"],
+                "manifest": manifest, "code": code, "tests": tests.decode("utf-8"),
+                "code_sha256": meta["sha256"], "tests_sha256": meta["tests_sha256"],
+                "created_by_run": meta["created_by_run"], "created_at": meta["created_at"]}
+
     def describe_digest(self, code_sha256: str) -> dict | None:
         """Name and version of the installed skill or candidate with this code digest."""
         with self.lock:

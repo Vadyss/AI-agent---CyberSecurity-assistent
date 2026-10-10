@@ -24,7 +24,7 @@ from .types import GatekeeperConfig, ParseFailure, PlanVerdict, SkillVerdict, Vi
 
 
 # Re-exported for the orchestrator, which may only import this public boundary.
-__all__ = ["AUDIT_ACTOR", "Gatekeeper", "SandboxClient", "UsageStore", "load_policy"]
+__all__ = ["AUDIT_ACTOR", "Gatekeeper", "IntegrityError", "SandboxClient", "UsageStore", "load_policy"]
 
 
 class Gatekeeper:
@@ -85,6 +85,18 @@ class Gatekeeper:
 
     def candidates_info(self, run_id):
         return self.registry.candidate_infos(run_id)
+
+    def review_candidate(self, run_id, name):
+        """What a human reviews before approving: the candidate's verified code and tests."""
+        require_run_id(run_id)
+        if not valid_name(name) or name not in {info.name for info in self.registry.candidate_infos(run_id)}:
+            raise KeyError(name)
+        return self.registry.review(run_id, name)
+
+    def review_skill(self, name):
+        if not valid_name(name):
+            raise KeyError(name)
+        return self.registry.review(None, name)
 
     def check_plan(self, run_id, raw):
         require_run_id(run_id)

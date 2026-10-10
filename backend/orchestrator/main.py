@@ -368,6 +368,47 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             raise ApiError(400, "INVALID_REQUEST", "The reason must contain 1 to 500 characters.")
         return await reject(run, reason, await app.state.gatekeepers.get(principal.tenant_id), app.state.emitter)
 
+    reviewer = Depends(requires(Permission.REVIEW_CODE))
+
+    @router.get("/runs/{run_id}/candidates")
+    async def list_candidates(run_id: str, principal: Principal = reader):
+        run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
+        if run is None:
+            await stored_run(run_id, principal)
+            return {"candidates": []}  # Candidates exist only while a run awaits a decision.
+        tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
+        return {"candidates": [c.model_dump(mode="json") for c in tenant_gatekeeper.candidates_info(run_id)]}
+
+    @router.get("/runs/{run_id}/candidates/{name}")
+    async def review_candidate(run_id: str, name: str, principal: Principal = reviewer):
+        run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
+        if run is None:
+            await stored_run(run_id, principal)
+            raise ApiError(404, "CANDIDATE_NOT_FOUND", "This run has no such candidate tool.")
+        tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
+        from gatekeeper.api import IntegrityError
+
+        try:
+            return await asyncio.to_thread(tenant_gatekeeper.review_candidate, run_id, name)
+        except KeyError:
+            raise ApiError(404, "CANDIDATE_NOT_FOUND", "This run has no such candidate tool.") from None
+        except IntegrityError:
+            raise ApiError(409, "INTEGRITY_VIOLATION", "The tool's files no longer match their verified "
+                                                       "digests; they are not shown and cannot be approved.") from None
+
+    @router.get("/skills/{name}")
+    async def review_skill(name: str, principal: Principal = reviewer):
+        tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
+        from gatekeeper.api import IntegrityError
+
+        try:
+            return await asyncio.to_thread(tenant_gatekeeper.review_skill, name)
+        except KeyError:
+            raise ApiError(404, "SKILL_NOT_FOUND", "No such tool in this tenant's library.") from None
+        except IntegrityError:
+            raise ApiError(409, "INTEGRITY_VIOLATION", "The tool's files no longer match their verified "
+                                                       "digests; they are not shown.") from None
+
     @router.get("/usage")
     async def usage(principal: Principal = reader):
         return await app.state.quotas.report(principal.tenant_id)
