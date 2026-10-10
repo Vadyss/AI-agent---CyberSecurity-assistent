@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from gatekeeper.audit import verify_audit
 from orchestrator.config import Settings
 from orchestrator.main import create_app
-from tests.fakes import InProcessSandbox
+from tests.fakes import InProcessSandbox, test_settings
 
 A = ["run_started", "llm_usage", "plan_ready", "skill_reused", "capability_missing", "forge_started", "llm_usage", "skill_tests_failed",
      "forge_started", "llm_usage", "skill_candidate_ready", "llm_usage", "rule_drafted", "rule_evaluated", "llm_usage", "rule_drafted", "rule_evaluated",
@@ -152,7 +152,7 @@ def test_web_parser_is_forged_and_verified(client):
 
 
 def test_restart_preserves_registry_and_quarantines_modified_artifact(tmp_path):
-    settings = replace(Settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
+    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as first:
         run_id, events = start(first, "spray")
         assert first.post(f"/api/runs/{run_id}/approve", json={}).status_code == 200

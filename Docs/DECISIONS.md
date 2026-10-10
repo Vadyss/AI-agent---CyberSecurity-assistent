@@ -46,3 +46,10 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Order:** The database foundation (a P2 item) is built before P1, because identities, tenants and API keys need it.
 - **Testing:** One SQL implementation. Fast tests use in-memory SQLite. `backend/scripts/test.sh` also starts a throwaway PostgreSQL server, and the storage tests run against both. A test checks that the migrations match the models and downgrade cleanly.
 - **Trade-off:** Backups must cover both PostgreSQL and the `/data` volume (see the operations guide).
+
+## D-008 Secure defaults and three environments
+
+- **Decision:** `ENVIRONMENT` is `production` unless set otherwise, and `AUTH_MODE` is `oidc`. In production the backend refuses to start without a PostgreSQL `DATABASE_URL`, complete OIDC settings, an HTTPS issuer and a real model provider. `AUTH_MODE=disabled` (one local tenant, local admin) is allowed only in `development` and `test`. The demo overlay uses it, and it must never be exposed beyond localhost.
+- **Why:** A forgotten variable must produce a server that does not start, not one that runs without authentication.
+- **Implementation:** The app is created by `uvicorn orchestrator.main:create_app --factory`, so configuration is validated at startup instead of at import. Migrations run in a one-shot `migrate` service before the backend starts. `POSTGRES_PASSWORD` has no default.
+- **Trade-off:** The `deploy` job on `main` now needs `POSTGRES_PASSWORD` (secret) and the `OIDC_*` variables configured in GitHub before it can start the stack.

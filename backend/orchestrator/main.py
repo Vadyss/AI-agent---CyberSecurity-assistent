@@ -23,7 +23,7 @@ CONTRACT_VERSION = 1
 
 
 def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipeline_runner=None, voice=None) -> FastAPI:
-    config = settings or Settings.from_env()
+    config = (settings or Settings.from_env()).validate()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -167,5 +167,3 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.include_router(router, prefix="/api")
     return app
 
-
-app = create_app()

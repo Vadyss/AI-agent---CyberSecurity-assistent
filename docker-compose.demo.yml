@@ -1,8 +1,12 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 # Use a separate project when another stack already owns port 3000.
+# Demo mode: development environment, mock model, authentication disabled
+# (one local tenant). Never expose this overlay beyond localhost.
 services:
   backend:
     environment:
+      ENVIRONMENT: development
+      AUTH_MODE: disabled
       LLM_PROVIDER: mock
       MOCK_DELAY_MS: "600"
       APIFY_TOKEN: ""
@@ -11,6 +15,10 @@ services:
       ELEVENLABS_VOICE_ID: ""
     volumes:
       - frankenstein-data-demo:/data
+  postgres:
+    volumes:
+      - postgres-data-demo:/var/lib/postgresql
 
 volumes:
   frankenstein-data-demo: {}
+  postgres-data-demo: {}

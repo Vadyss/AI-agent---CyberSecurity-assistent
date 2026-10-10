@@ -43,6 +43,9 @@ jobs:
   integration:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      # Throwaway database of the isolated CI stack; never a deployment secret.
+      POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -101,6 +104,11 @@ jobs:
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+          OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_ADMIN_EMAIL }}
           NEXT_PUBLIC_API_BASE: ${{ vars.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000' }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000' }}
           BACKEND_BIND_HOST: ${{ vars.BACKEND_BIND_HOST || '127.0.0.1' }}

@@ -15,7 +15,7 @@ from gatekeeper.types import ParseFailure
 
 
 async def main() -> int:
-    settings = Settings.from_env()
+    settings = Settings.from_env(llm_only=True)
     client = make_client(settings)
     try:
         result = await client.chat("planner", 'Return only JSON {"ok":true}.', "Connection check; do not produce source code.")

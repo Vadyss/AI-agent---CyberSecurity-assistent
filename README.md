@@ -73,7 +73,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
 
 ```bash
 python -m pip install -r backend/requirements.txt
-python -m uvicorn orchestrator.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -m uvicorn orchestrator.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 A full run needs the sandbox, so use the Docker stack, or point `SANDBOX_URL` at a running sandbox and set a writable `DATA_DIR`. Then, in a second terminal:

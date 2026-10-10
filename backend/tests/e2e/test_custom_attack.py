@@ -15,7 +15,7 @@ from orchestrator.llm_mock import MockLlm
 from orchestrator.main import create_app
 from orchestrator.planner import make_roles
 from tests.e2e.test_scenarios import start
-from tests.fakes import InProcessSandbox
+from tests.fakes import InProcessSandbox, test_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 SLUG = "custom_ssh_burst"
@@ -49,7 +49,7 @@ class CustomClient(MockLlm):
 
 
 def custom_app(tmp_path, enabled=True, generator=None, client_type=CustomClient):
-    settings = replace(Settings(), llm_provider="mock", mock_delay_ms=0,
+    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0,
                        examiner_enabled=enabled, data_dir=tmp_path / "data")
     llm = client_type(settings, generator)
     return create_app(settings=settings, sandbox=InProcessSandbox(), roles=make_roles(settings, llm)), llm

@@ -463,7 +463,7 @@ async def json_chat(client: LlmClient, role: str, system: str, user: str, contex
 def ask(prompt: str, system: str | None = None, model: str | None = None) -> str | ParseFailure:
     """Original synchronous requests API retained for IDE scripts."""
     from orchestrator.config import Settings
-    settings = Settings.from_env(load_env_file=True)
+    settings = Settings.from_env(load_env_file=True, llm_only=True)
     if settings.llm_provider == "mock":
         raise LlmError("Synchronous ask requires a live provider; the mock uses async chat.")
     key = (settings.apify_token or settings.llm_api_key) if settings.llm_provider == "apify" else settings.llm_api_key

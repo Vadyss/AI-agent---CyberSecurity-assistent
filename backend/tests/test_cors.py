@@ -1,24 +1,21 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
-import importlib
-
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-import main
+from orchestrator.main import create_app
 
 
 @pytest.fixture
 def client(monkeypatch):
-    with monkeypatch.context() as config:
-        config.setenv(
-            "CORS_ORIGINS",
-            " http://localhost:3000, http://127.0.0.1:3000 , https://frontend.example, ",
-        )
-        backend = importlib.reload(main)
-        with TestClient(backend.app, raise_server_exceptions=False) as test_client:
-            yield test_client
-    importlib.reload(main)
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        " http://localhost:3000, http://127.0.0.1:3000 , https://frontend.example, ",
+    )
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_MODE", "disabled")
+    with TestClient(create_app(), raise_server_exceptions=False) as test_client:
+        yield test_client
 
 
 @pytest.mark.parametrize(
@@ -43,7 +40,7 @@ def test_unknown_origin_cannot_read_response_in_browser(client):
 
 @pytest.mark.parametrize("origin", ["http://localhost:3000", "https://unknown.example"])
 def test_unexpected_error_keeps_cors_policy(client, origin):
-    @main.app.get("/test-unexpected-error")
+    @client.app.get("/test-unexpected-error")
     async def unexpected_error():
         raise RuntimeError("Test failure")
 

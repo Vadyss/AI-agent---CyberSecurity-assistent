@@ -8,6 +8,8 @@ ENV PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY alembic.ini ./
+COPY storage/ ./storage/
 COPY orchestrator/ ./orchestrator/
 COPY gatekeeper/ ./gatekeeper/
 COPY examiner/ ./examiner/
@@ -22,4 +24,5 @@ USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
 
-CMD ["uvicorn", "orchestrator.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "websockets", "--ws-ping-interval", "20", "--ws-ping-timeout", "20"]
+# --factory: configuration is read and validated when the server starts, not at import.
+CMD ["uvicorn", "orchestrator.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--ws", "websockets", "--ws-ping-interval", "20", "--ws-ping-timeout", "20"]

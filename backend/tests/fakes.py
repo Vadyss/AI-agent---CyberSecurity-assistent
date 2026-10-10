@@ -2,6 +2,7 @@
 """Test-only transport adapter: submitted code still runs in a limited child."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -30,3 +31,11 @@ class InProcessSandbox:
 
     async def close(self) -> None:
         pass
+
+
+def test_settings(**overrides):
+    """Settings for tests: the test environment, authentication disabled, mock model."""
+    from orchestrator.config import Settings
+
+    return replace(Settings(), environment="test", auth_mode="disabled", llm_provider="mock", mock_delay_ms=0,
+                   **overrides)
