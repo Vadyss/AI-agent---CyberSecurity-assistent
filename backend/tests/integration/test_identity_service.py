@@ -109,7 +109,9 @@ async def test_api_keys_authenticate_until_revoked_or_expired(service):
     assert (principal.kind, principal.id, principal.role, principal.tenant_id) == ("api_key", key.id, "analyst", admin.tenant_id)
     assert principal.can(Permission.RUN) and not principal.can(Permission.MANAGE)
     stored = (await service.list_api_keys(admin.tenant_id))[0]
-    assert stored.last_used_at is not None and token.split("_")[2] not in stored.secret_sha256
+    secret = apikeys.parse(token)[1]  # The secret itself may contain "_".
+    assert stored.last_used_at is not None and secret not in stored.secret_sha256
+    assert stored.secret_sha256 == apikeys.digest(secret)
 
     key_id, _ = apikeys.parse(token)
     for forged in (f"tsk_{key_id}_{'A' * 43}", "tsk_0123456789abcdef_" + "B" * 43, "Bearer x", ""):

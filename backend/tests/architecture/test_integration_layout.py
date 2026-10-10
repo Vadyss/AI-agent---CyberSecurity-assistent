@@ -40,3 +40,12 @@ def test_readme_local_document_links_exist():
     for target in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", (ROOT / "README.md").read_text()):
         if "://" not in target:
             assert (ROOT / target).exists(), target
+
+
+def test_backend_image_contains_every_runtime_package():
+    dockerfile = (ROOT / "backend" / "Dockerfile").read_text()
+    packages = sorted(p.name for p in (ROOT / "backend").iterdir()
+                      if (p / "__init__.py").is_file() and p.name != "tests")
+    assert packages, "No backend packages found."
+    for package in packages:
+        assert f"COPY {package}/ ./{package}/" in dockerfile, package

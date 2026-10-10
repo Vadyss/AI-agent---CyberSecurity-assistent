@@ -69,3 +69,22 @@ def unsigned_token(**claims) -> str:
     now = int(time.time())
     body = {"iss": ISSUER, "aud": AUDIENCE, "sub": "attacker", "iat": now, "exp": now + 300, **claims}
     return f"{part({'alg': 'none', 'typ': 'JWT'})}.{part(body)}."
+
+
+def bearer(idp: TestIdp, subject: str, email: str | None = None, **claims) -> dict:
+    return {"Authorization": "Bearer " + idp.token(subject, email=email or f"{subject}@example.test", **claims)}
+
+
+def call(client, function, *args, **kwargs):
+    """Run an async service call on the TestClient's event loop."""
+    return client.portal.call(lambda: function(*args, **kwargs))
+
+
+def wait_finished(client, run_id: str, headers: dict, timeout: float = 10) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        runs = {r["run_id"]: r for r in client.get("/runs", headers=headers).json()["runs"]}
+        if runs[run_id]["status"] not in {"queued", "running"}:
+            return runs[run_id]
+        time.sleep(0.02)
+    raise AssertionError("The run did not finish.")

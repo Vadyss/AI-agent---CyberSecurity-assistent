@@ -237,6 +237,9 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         finally:
             await app.state.hub.disconnect(subscriber)
 
+    from orchestrator.admin_api import build_admin_router
+
+    router.include_router(build_admin_router(config))
     app.include_router(router)
     app.include_router(router, prefix="/api")
     return app
