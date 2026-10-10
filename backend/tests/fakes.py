@@ -37,5 +37,13 @@ def test_settings(**overrides):
     """Settings for tests: the test environment, authentication disabled, mock model."""
     from orchestrator.config import Settings
 
-    return replace(Settings(), environment="test", auth_mode="disabled", llm_provider="mock", mock_delay_ms=0,
-                   **overrides)
+    defaults = {"environment": "test", "auth_mode": "disabled", "llm_provider": "mock", "mock_delay_ms": 0}
+    return replace(Settings(), **{**defaults, **overrides})
+
+
+def tenant_data_dir(settings_or_app):
+    """Data directory of the local tenant used when authentication is disabled."""
+    from identity.service import LOCAL_TENANT_ID
+
+    settings = getattr(getattr(settings_or_app, "state", None), "settings", settings_or_app)
+    return settings.data_dir / "tenants" / str(LOCAL_TENANT_ID)

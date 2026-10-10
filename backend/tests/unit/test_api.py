@@ -56,7 +56,7 @@ def test_intake_trim_unknown_fields_active_run_and_event_replay(stub_client):
     assert created.status_code == 202
     run_id = created.json()["run_id"]
     assert_error(stub_client.post("/api/runs", json={"request": "another"}), 409, "RUN_ALREADY_ACTIVE")
-    run = stub_client.app.state.store.get(run_id)
+    run = stub_client.app.state.store.lookup(run_id)
     assert run.request == "hello"
     assert stub_client.get(f"/api/runs/{run_id}/events").json()["events"][0]["data"]["request"] == "hello"
     assert stub_client.get(f"/api/runs/{run_id}/events?after_seq=1").json() == {"events": []}

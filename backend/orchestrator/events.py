@@ -130,5 +130,5 @@ class EventEmitter:
                 run.status = STATUS_BY_EVENT[event_type]
             if event_type in TERMINAL_TYPES:
                 run.finished_at = event["timestamp"]
-            self.hub.broadcast(event)
+            self.hub.broadcast(event, run.tenant_id)
             return event

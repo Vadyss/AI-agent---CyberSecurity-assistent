@@ -6,6 +6,7 @@ import asyncio
 import re
 import secrets
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -53,6 +54,8 @@ class PendingApproval:
 class RunState:
     run_id: str
     request: str
+    tenant_id: uuid.UUID | None = None
+    created_by: str = "system"
     status: str = "running"
     created_at: str = field(default_factory=now_iso)
     finished_at: str | None = None
@@ -83,29 +86,40 @@ class RunStore:
         self.lock = asyncio.Lock()
         self.max_runs = max_runs
 
-    async def create(self, request: str) -> RunState:
+    async def create(self, request: str, tenant_id: uuid.UUID | None = None, created_by: str = "system") -> RunState:
         async with self.lock:
-            if any(r.status in ACTIVE_STATUSES for r in self.runs.values()):
+            # One active run per tenant: candidates of concurrent runs could collide.
+            if any(r.status in ACTIVE_STATUSES and r.tenant_id == tenant_id for r in self.runs.values()):
                 raise ApiError(409, "RUN_ALREADY_ACTIVE", "The previous run has not finished yet.")
             while len(self.runs) >= self.max_runs:
-                oldest = next(r for r in self.runs.values() if r.status in FINISHED_STATUSES)
+                oldest = next((r for r in self.runs.values() if r.status in FINISHED_STATUSES), None)
+                if oldest is None:
+                    raise ApiError(429, "TOO_MANY_RUNS", "Too many runs are active; try again later.")
                 if oldest.voice_task and not oldest.voice_task.done():
                     oldest.voice_task.cancel()
                 del self.runs[oldest.run_id]
             run_id = "run_" + secrets.token_hex(4)
             while run_id in self.runs:
                 run_id = "run_" + secrets.token_hex(4)
-            run = RunState(run_id, request)
+            run = RunState(run_id, request, tenant_id, created_by)
             self.runs[run_id] = run
             return run
 
-    def get(self, run_id: str) -> RunState:
+    def lookup(self, run_id: str) -> RunState:
+        """Internal access without a tenant check; API handlers must use ``get``."""
         if not re.fullmatch(r"run_[a-z0-9]{4,32}", run_id) or run_id not in self.runs:
             raise ApiError(404, "RUN_NOT_FOUND", "Run not found.")
         return self.runs[run_id]
 
-    def list(self) -> list[dict]:
-        return [r.info() for r in reversed(list(self.runs.values()))]
+    def get(self, run_id: str, tenant_id: uuid.UUID | None) -> RunState:
+        run = self.lookup(run_id)
+        # Another tenant's run is reported exactly like a missing one.
+        if run.tenant_id != tenant_id:
+            raise ApiError(404, "RUN_NOT_FOUND", "Run not found.")
+        return run
+
+    def list(self, tenant_id: uuid.UUID | None) -> list[dict]:
+        return [r.info() for r in reversed(list(self.runs.values())) if r.tenant_id == tenant_id]
 
     async def close(self) -> None:
         tasks = [t for r in self.runs.values() for t in (r.task, r.voice_task) if t and not t.done()]

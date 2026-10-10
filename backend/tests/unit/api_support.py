@@ -63,7 +63,7 @@ def make_stub_app(tmp_path):
 
 
 async def prepare_approval(app, run_id):
-    run = app.state.store.get(run_id)
+    run = app.state.store.lookup(run_id)
     if not run.events:
         await asyncio.sleep(.01)
     await app.state.emitter.emit(run, "validation_done", "validation", {"dataset": "validation", "metrics": METRICS})

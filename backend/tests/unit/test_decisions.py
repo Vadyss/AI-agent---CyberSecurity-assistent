@@ -20,7 +20,7 @@ def test_concurrent_decisions_have_exactly_one_winner(tmp_path, second):
                          for action in ("approve", second)]
             codes = [r.result().status_code for r in responses]
         assert sorted(codes) == [200, 409]
-        assert len([e for e in app.state.store.get(run_id).events if e["type"] in {"rule_approved", "rule_rejected"}]) == 1
+        assert len([e for e in app.state.store.lookup(run_id).events if e["type"] in {"rule_approved", "rule_rejected"}]) == 1
         assert gk.promotions + len(gk.rejections) == 1
 
 
@@ -31,7 +31,7 @@ def test_failed_promotion_fails_run_and_discards(tmp_path):
         run_id = client.post("/api/runs", json={"request": "hello"}).json()["run_id"]
         client.portal.call(prepare_approval, app, run_id)
         assert client.post(f"/api/runs/{run_id}/approve", json={}).status_code == 500
-        run = app.state.store.get(run_id)
+        run = app.state.store.lookup(run_id)
         assert run.status == "failed"
         assert run.events[-1]["data"]["reason_code"] == "INTERNAL_ERROR"
         assert run_id in gk.discarded

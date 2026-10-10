@@ -1,8 +1,8 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 """Every sandbox execution leaves a hash-chained audit record.
 
-Records hold digests only: who ran it, which tool version, and SHA-256 of
-the inputs and the output. Raw code, logs and results never enter the audit.
+Records hold digests only: which tool version ran, and SHA-256 of the
+inputs and the output. The audit log itself adds who caused it (the actor). Raw code, logs and results never enter the audit.
 """
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Callable, Iterator
 
+from .audit import AUDIT_ACTOR
 from .recipe import canonical_json
 from .types import SandboxError
 
-# Set by the API layer for the lifetime of a run; ``None`` means the system.
-AUDIT_ACTOR: ContextVar[str | None] = ContextVar("audit_actor", default=None)
+__all__ = ["AUDIT_ACTOR", "AuditedSandbox", "audit_run", "digest"]
 _RUN_ID: ContextVar[str | None] = ContextVar("audit_run_id", default=None)
 
 
@@ -73,7 +73,6 @@ class AuditedSandbox:
     def _record(self, mode: str, code_sha256: str, inputs: dict, output: dict | None,
                 status: str | None, started: float) -> None:
         self.audit.append("sandbox_execution", _RUN_ID.get(), {
-            "actor": AUDIT_ACTOR.get(),
             "mode": mode,
             "tool": self.describe(code_sha256),
             "code_sha256": code_sha256,

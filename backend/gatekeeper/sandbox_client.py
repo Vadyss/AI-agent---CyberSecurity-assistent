@@ -57,6 +57,17 @@ class SandboxClient:
             transport = httpx.AsyncHTTPTransport(uds=uds)
         self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout_s,
                                         transport=transport, trust_env=False)
+        self.tenant_id: str | None = None
+        self._owns_client = True
+
+    def for_tenant(self, tenant_id: str) -> SandboxClient:
+        """A view that shares the connection pool and stamps every job with the tenant."""
+        view = object.__new__(SandboxClient)
+        view.timeout_s, view.client, view.tenant_id, view._owns_client = self.timeout_s, self.client, tenant_id, False
+        return view
+
+    def _stamp(self, job: dict[str, Any]) -> dict[str, Any]:
+        return {**job, "tenant_id": self.tenant_id} if self.tenant_id else job
 
     async def health(self) -> bool:
         try:
@@ -85,16 +96,17 @@ class SandboxClient:
 
     async def run(self, code: str, inputs: list, params: dict, *,
                   allowed_imports: list[str], timeout_s: float = 15) -> dict[str, Any]:
-        return await self.execute({"job_id": uuid4().hex, "mode": "run", "files": {"skill.py": code},
-                                   "entrypoint": "run", "inputs": inputs, "params": params,
-                                   "allowed_imports": allowed_imports, "timeout_s": timeout_s})
+        return await self.execute(self._stamp({"job_id": uuid4().hex, "mode": "run", "files": {"skill.py": code},
+                                               "entrypoint": "run", "inputs": inputs, "params": params,
+                                               "allowed_imports": allowed_imports, "timeout_s": timeout_s}))
 
     async def test(self, code: str, tests: str, *,
                    allowed_imports: list[str], timeout_s: float = 10) -> dict[str, Any]:
-        return await self.execute({"job_id": uuid4().hex, "mode": "test",
-                                   "files": {"skill.py": code, "test_skill.py": tests},
-                                   "entrypoint": "run", "inputs": [], "params": {},
-                                   "allowed_imports": allowed_imports, "timeout_s": timeout_s})
+        return await self.execute(self._stamp({"job_id": uuid4().hex, "mode": "test",
+                                               "files": {"skill.py": code, "test_skill.py": tests},
+                                               "entrypoint": "run", "inputs": [], "params": {},
+                                               "allowed_imports": allowed_imports, "timeout_s": timeout_s}))
 
     async def close(self) -> None:
-        await self.client.aclose()
+        if self._owns_client:
+            await self.client.aclose()

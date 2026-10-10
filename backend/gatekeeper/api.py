@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 
-from .audit import AuditLog
+from .audit import AUDIT_ACTOR, AuditLog
 from .audited_sandbox import AuditedSandbox, audit_run
 from .datasets import DatasetStore
 from .evaluator import evaluate_recipe
@@ -21,6 +21,10 @@ from .registry import IntegrityError, Registry, UsageStore, recipe_sha256
 from .sandbox_client import SandboxClient
 from .static_analysis import analyze_code
 from .types import GatekeeperConfig, ParseFailure, PlanVerdict, SkillVerdict, Violation
+
+
+# Re-exported for the orchestrator, which may only import this public boundary.
+__all__ = ["AUDIT_ACTOR", "Gatekeeper", "SandboxClient", "UsageStore", "load_policy"]
 
 
 class Gatekeeper:

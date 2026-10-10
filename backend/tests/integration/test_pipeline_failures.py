@@ -14,7 +14,7 @@ from orchestrator.config import Settings
 from orchestrator.llm import LlmError
 from orchestrator.main import create_app
 from tests.e2e.test_scenarios import start
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, tenant_data_dir, test_settings
 
 
 @pytest.mark.parametrize("error,code", [(LlmError("private provider error"), "LLM_ERROR"),
@@ -74,7 +74,7 @@ def test_llm_budget_is_per_run_and_counted(tmp_path):
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as client:
         run_id, events = start(client, "spray")
         assert events[-1]["data"]["reason_code"] == "LLM_ERROR"
-        assert client.app.state.store.get(run_id).stats.llm_calls == 1
+        assert client.app.state.store.lookup(run_id).stats.llm_calls == 1
 
 
 def test_summary_failure_uses_fallback(tmp_path):
@@ -98,7 +98,7 @@ def test_failed_run_saves_complete_usage_before_terminal_event(tmp_path):
         usage = [e for e in events if e["type"] == "llm_usage"]
         assert [e["data"]["kind"] for e in usage] == ["call", "summary"]
         assert events[-2]["type"] == "llm_usage" and events[-1]["type"] == "run_failed"
-        saved = json.loads((tmp_path / "runs" / run_id / "usage.json").read_text())
-        assert len(saved["records"]) == client.app.state.store.get(run_id).stats.llm_calls == 1
+        saved = json.loads((tenant_data_dir(settings) / "runs" / run_id / "usage.json").read_text())
+        assert len(saved["records"]) == client.app.state.store.lookup(run_id).stats.llm_calls == 1
         assert saved["summary"] == usage[-1]["data"]["summary"]
         assert saved["records"][0]["estimated"] and saved["records"][0]["cost_source"] == "mock"

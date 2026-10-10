@@ -17,7 +17,7 @@ from tests.unit.api_support import METRICS
 async def test_untrusted_request_is_preserved_as_plain_json(text):
     run = RunState("run_aabb", text)
     class Hub:
-        def broadcast(self, event):
+        def broadcast(self, event, tenant_id):
             assert run.events[-1] == event
             assert run.last_seq == event["seq"]
     emitter = EventEmitter(Hub())

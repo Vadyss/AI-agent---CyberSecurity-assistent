@@ -67,3 +67,13 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Choosing a tenant:** A user in one tenant needs nothing extra. A member of several tenants sends `X-Toolsmith-Tenant` (ID or slug). A request for a tenant the user does not belong to gets the same answer whether or not that tenant exists.
 - **API keys:** Format `tsk_<id>_<secret>`. Only the SHA-256 of the 256-bit secret is stored, and the full key is shown once. Keys belong to a tenant, have the `analyst` or `viewer` role (never `admin`; administration needs a human login), can expire and can be revoked. Invalid, revoked and expired keys get the same error.
 - **Safety rails:** A tenant always keeps at least one admin. Suspended tenants are refused.
+
+## D-011 Tenant isolation model
+
+- **Data:** Each tenant has its own gatekeeper and data directory, `DATA_DIR/tenants/<tenant id>/`, with its own tool registry, candidates, approved rules, lessons, usage files and hash-chained audit log. Tools approved in one tenant are never visible to another.
+- **Runs:** Every run records its tenant and creator. A request for another tenant's run gets the same `404 RUN_NOT_FOUND` as a missing run, so tenants cannot probe for each other's run IDs. One active run per tenant (not globally).
+- **Events:** The WebSocket hub delivers an event only to subscribers of the tenant that owns the run. WebSocket handshakes are authenticated like HTTP requests (the tenant can be chosen with `?tenant=`).
+- **Sandbox:** Every job carries its tenant ID for per-tenant fair scheduling (D-005). Concurrent jobs are separated by private UIDs.
+- **Audit:** Every audit record carries the actor (`user:<id>`, `api_key:<id>`, `local:local`), including approvals and sandbox executions.
+- **Local tenant:** With authentication disabled, everything belongs to a local tenant with a fixed ID, so its data survives restarts in development.
+- **Trade-off:** Principals are cached for up to 60 seconds after token verification, so a role change can take up to a minute to apply.

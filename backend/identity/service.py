@@ -27,6 +27,8 @@ KEY_TOUCH_INTERVAL = timedelta(seconds=60)
 MAX_TENANTS_CREATED_PER_USER = 3
 MAX_API_KEYS_PER_TENANT = 50
 LOCAL_TENANT_SLUG = "local"
+# Fixed, so the local tenant's data directory survives restarts even with an ephemeral database.
+LOCAL_TENANT_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
 def utcnow() -> datetime:
@@ -192,9 +194,9 @@ class IdentityService:
     async def ensure_local_tenant(self) -> Principal:
         """The single tenant used when authentication is disabled (development and tests)."""
         async with self.db.session() as session:
-            tenant = (await session.execute(sa.select(Tenant).where(Tenant.slug == LOCAL_TENANT_SLUG))).scalar_one_or_none()
+            tenant = await session.get(Tenant, LOCAL_TENANT_ID)
             if tenant is None:
-                tenant = Tenant(slug=LOCAL_TENANT_SLUG, name="Local")
+                tenant = Tenant(id=LOCAL_TENANT_ID, slug=LOCAL_TENANT_SLUG, name="Local")
                 session.add(tenant)
                 await session.flush()
             return Principal("local", "local", tenant.id, tenant.slug, "admin")

@@ -49,7 +49,7 @@ async def test_run_records_actor_tool_and_digests_but_no_content(tmp_path):
     record = records(tmp_path)[-1]
     assert record["kind"] == "sandbox_execution" and record["run_id"] == "run_abcd1234"
     detail = record["detail"]
-    assert detail["actor"] == "user:analyst@example.test"
+    assert record["actor"] == "user:analyst@example.test"
     assert detail["tool"] == {"name": "ssh_parser", "version": 2}
     assert detail["code_sha256"] == hashlib.sha256(CODE.encode()).hexdigest()
     assert detail["input_sha256"] == digest({"inputs": ["secret log line"], "params": {"window_s": 60}})
