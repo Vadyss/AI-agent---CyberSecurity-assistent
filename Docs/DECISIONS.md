@@ -24,3 +24,11 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 
 - **Decision:** Backend tests run with `sh backend/scripts/test.sh`, inside `python:3.12-slim` as root, the same base image as production.
 - **Why:** The local interpreter is Python 3.9, and some sandbox isolation tests need root inside a container to switch user IDs. CI uses the same script so local and CI results match.
+
+## D-005 Sandbox isolation: hardened process per job with a private UID
+
+- **Decision:** Generated code runs in a fresh Python process per job inside one long-lived, hardened sandbox container. Each job gets its own unprivileged UID from a small slot pool (`SANDBOX_UID_BASE` + slot). After a job ends, the supervisor kills every process of that UID (found through `/proc`) before the slot is reused. If that ever fails, the supervisor exits, so a dirty UID is never reused and the restart policy brings up a clean container.
+- **Why not a container or microVM per run:** Starting containers per job would need the Docker socket in the backend, and that socket is equivalent to root on the host. gVisor or Firecracker add a host runtime that a team of two would have to operate. A private UID per job gives kernel-enforced separation between concurrent jobs (and so between tenants), on top of the existing container boundary and Python-level guards.
+- **What enforces it:** read-only root file system; no network (D-006); all capabilities dropped except `SETUID`, `SETGID` and `KILL` for the supervisor; `no-new-privileges`; job processes have zero capabilities; per-job `RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NOFILE`, `RLIMIT_NPROC=16` and `RLIMIT_FSIZE=0` (no file writes at all); container `pids_limit`, memory and CPU limits; `/tmp` readable only by root.
+- **Fairness:** At most `SANDBOX_MAX_JOBS` jobs run at once, and at most `SANDBOX_MAX_JOBS_PER_TENANT` of them for one tenant.
+- **Trade-off:** The supervisor process starts as UID 0 (with the three capabilities above) because it must switch UIDs. Untrusted code never runs as UID 0. The kernel is still shared with the host, so a kernel exploit would cross the boundary; gVisor (`runtime: runsc`) can be added later without code changes.

@@ -72,13 +72,25 @@ services:
     networks:
       - sandbox_net
     restart: unless-stopped
+    # tini reaps orphans, so zombie processes never pin a job UID.
+    init: true
     read_only: true
     tmpfs:
-      - /tmp:size=64m,mode=1777,noexec,nosuid
+      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
     cap_drop:
       - ALL
+    # Only what the supervisor needs to start each job under a private UID and
+    # to kill every process of that UID afterwards.
+    cap_add:
+      - SETUID
+      - SETGID
+      - KILL
     security_opt:
       - no-new-privileges:true
+    environment:
+      SANDBOX_ISOLATION: uid
+      SANDBOX_MAX_JOBS: "${SANDBOX_MAX_JOBS:-2}"
+      SANDBOX_MAX_JOBS_PER_TENANT: "${SANDBOX_MAX_JOBS_PER_TENANT:-1}"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100
