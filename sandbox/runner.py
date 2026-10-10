@@ -12,6 +12,7 @@ import json
 import os
 import re
 import resource
+import string
 import sys
 import types
 from typing import Any
@@ -60,13 +61,33 @@ def _error(exc: BaseException, limit: int = 2000) -> str:
     return "".join(c for c in message if ord(c) >= 32 or c in "\n\t")[:limit]
 
 
+# Keep in sync with gatekeeper.policy.BASELINE_FORBIDDEN_ATTRIBUTES.
+FORBIDDEN_ATTRIBUTES = frozenset(
+    "gi_frame gi_code gi_yieldfrom cr_frame cr_code cr_await ag_frame ag_code ag_await f_back f_globals "
+    "f_locals f_builtins f_code f_trace tb_frame tb_next co_code co_consts co_names func_globals func_code "
+    "format_map".split())
+
+
+def _plain_format_template(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        return False
+    try:
+        parts = list(string.Formatter().parse(node.value))
+    except ValueError:
+        return False
+    return all(field is None or ("." not in field and "[" not in field) for _, field, _, _ in parts) \
+        and all(not spec or "{" not in spec for _, _, spec, _ in parts)
+
+
 def _runtime_ast_check(source: str, filename: str) -> ast.Module:
     tree = ast.parse(source, filename)
     # Import/open hooks remain active even when callers bypass the gatekeeper.
     # Deny introspection that could reach this trusted runner or its globals.
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+        if isinstance(node, ast.Attribute) and (node.attr.startswith("_") or node.attr in FORBIDDEN_ATTRIBUTES):
             raise PermissionError("Sandbox nepovoluje introspekci atributů.")
+        if isinstance(node, ast.Attribute) and node.attr == "format" and not _plain_format_template(node.value):
+            raise PermissionError("Sandbox povoluje str.format jen na literálu bez atributů.")
         if isinstance(node, ast.Name) and node.id.startswith("__"):
             raise PermissionError("Sandbox nepovoluje introspekci jmen.")
     return tree

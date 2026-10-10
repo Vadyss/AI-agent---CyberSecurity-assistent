@@ -11,7 +11,7 @@ def test_frozen_and_digest(gk_policy):
     assert 'thresholds' not in digest and 'seed' not in str(digest)
     assert 'open' in digest['forbidden_calls']
 
-@pytest.mark.parametrize('mutation', ['imports', 'network', 'threshold', 'identity', 'attempts', 'extra'])
+@pytest.mark.parametrize('mutation', ['imports', 'network', 'threshold', 'identity', 'attempts', 'extra', 'introspection'])
 def test_policy_rejects_invalid(tmp_path, gk_policy, mutation):
     raw = gk_policy.model_dump(exclude={'sha256'})
     if mutation == 'imports': raw['skills']['allowed_imports'] += ('os',)
@@ -20,6 +20,7 @@ def test_policy_rejects_invalid(tmp_path, gk_policy, mutation):
     if mutation == 'identity': raw['recipe']['identity_fields'] = []
     if mutation == 'attempts': raw['attempts']['plan'] = 9
     if mutation == 'extra': raw['unknown'] = 1
+    if mutation == 'introspection': raw['skills']['forbidden_attributes'] = ('format_map',)
     path = tmp_path / 'policy.yaml'
     path.write_text(yaml.safe_dump(raw))
     with pytest.raises(Exception): load_policy(path)

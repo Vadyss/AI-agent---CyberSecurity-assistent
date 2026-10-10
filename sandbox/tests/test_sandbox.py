@@ -411,3 +411,28 @@ report(outcome)
     # RLIMIT_FSIZE=0 turns every write into EFBIG, wherever a file can be created.
     assert result["status"] == "ok", result
     assert "written" not in result["result"], result
+
+
+@pytest.mark.parametrize("code", [
+    "def run(inputs, params):\n    item = (x for x in inputs)\n    return [str(item.gi_frame)]\n",
+    "def run(inputs, params):\n    return ['{0.real}'.format(1)]\n",
+    "def run(inputs, params):\n    return [params['t'].format(1)]\n",
+    "def run(inputs, params):\n    return ['{x}'.format_map({'x': 1})]\n",
+])
+def test_runtime_rejects_introspection_without_gatekeeper(code):
+    # The runner re-checks submitted code, so a caller that skips the
+    # gatekeeper still cannot use these routes.
+    result = execute(code, params={"t": "{0}"})
+    assert result["status"] == "error"
+    assert "PermissionError" in result["error"]
+
+
+def test_runtime_allows_plain_format_templates():
+    result = execute("def run(inputs, params):\n    return ['{}-{:>3}'.format('a', 7)]\n")
+    assert result == {**result, "status": "ok", "result": ["a-  7"]}
+
+
+def test_runner_and_policy_share_the_introspection_denylist():
+    from gatekeeper.policy import BASELINE_FORBIDDEN_ATTRIBUTES
+    from sandbox import runner
+    assert runner.FORBIDDEN_ATTRIBUTES == BASELINE_FORBIDDEN_ATTRIBUTES

@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 import ast
+import string
 from .policy import Policy
 from .types import Violation
 from .names import violations_unique
+
+
+def safe_format_template(node: ast.AST) -> bool:
+    """A format template may not reach attributes or items: those run lookups hidden from the AST."""
+    if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        return False
+    try:
+        fields = [field for _, field, spec, _ in string.Formatter().parse(node.value) if field is not None]
+        specs = [spec for _, field, spec, _ in string.Formatter().parse(node.value) if spec]
+    except ValueError:
+        return False
+    return all("." not in field and "[" not in field for field in fields) and all("{" not in spec for spec in specs)
 
 
 def analyze_code(code: object, manifest: dict, policy: Policy, *, is_test: bool = False) -> list[Violation]:
@@ -64,6 +77,10 @@ def analyze_code(code: object, manifest: dict, policy: Policy, *, is_test: bool 
                 add("FORBIDDEN_CALL", f"Forbidden attribute call: {node.attr}.")
         if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
             add("FORBIDDEN_ATTRIBUTE", f"Forbidden internal attribute: {node.attr}.")
+        if isinstance(node, ast.Attribute) and node.attr in policy.skills.forbidden_attributes:
+            add("FORBIDDEN_ATTRIBUTE", f"Forbidden introspection attribute: {node.attr}.")
+        if isinstance(node, ast.Attribute) and node.attr == "format" and not safe_format_template(node.value):
+            add("FORBIDDEN_CALL", "str.format is allowed only on a literal template with plain fields.")
         if isinstance(node, (ast.Global, ast.Nonlocal, ast.AsyncFunctionDef, ast.Await, ast.Yield, ast.YieldFrom)):
             add("FORBIDDEN_SYNTAX", f"Forbidden construct: {type(node).__name__}.")
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.decorator_list:

@@ -9,6 +9,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+# Attributes that expose interpreter internals without a leading underscore.
+# The sandbox runner enforces the same set at runtime.
+BASELINE_FORBIDDEN_ATTRIBUTES = frozenset(
+    "gi_frame gi_code gi_yieldfrom cr_frame cr_code cr_await ag_frame ag_code ag_await f_back f_globals "
+    "f_locals f_builtins f_code f_trace tb_frame tb_next co_code co_consts co_names func_globals func_code "
+    "format_map".split())
+
+
 class Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -50,6 +58,7 @@ class SkillPolicy(Frozen):
     allowed_imports: tuple[str, ...]
     forbidden_calls: tuple[str, ...]
     forbid_dunder_access: Literal[True]
+    forbidden_attributes: tuple[str, ...]
     permissions: Permissions
     network_allowed_domains: tuple[str, ...]
     forbidden_param_patterns: tuple[str, ...]
@@ -60,6 +69,8 @@ class SkillPolicy(Frozen):
         forbidden = set("eval exec compile open __import__ input breakpoint globals locals vars getattr setattr delattr dir help exit quit memoryview print".split())
         if not set(self.allowed_imports) <= safe or not forbidden <= set(self.forbidden_calls):
             raise ValueError("The policy weakens forbidden imports or calls.")
+        if not BASELINE_FORBIDDEN_ATTRIBUTES <= set(self.forbidden_attributes):
+            raise ValueError("The policy weakens the introspection prohibition.")
         if self.network_allowed_domains or not {"exclude", "ignore", "whitelist", "allowlist", "skip"} <= set(self.forbidden_param_patterns):
             raise ValueError("The policy weakens the network or exception prohibition.")
         return self
@@ -122,6 +133,7 @@ class Policy(Frozen):
     def digest_for_llm(self) -> dict:
         return {"allowed_imports": list(self.skills.allowed_imports),
                 "forbidden_calls": list(self.skills.forbidden_calls),
+                "forbidden_attributes": list(self.skills.forbidden_attributes),
                 "forbidden_param_patterns": list(self.skills.forbidden_param_patterns),
                 "filter_ops": list(self.recipe.filter_ops), "condition_ops": list(self.recipe.condition_ops),
                 "max_code_bytes": self.skills.max_code_bytes, "max_test_bytes": self.skills.max_test_bytes,
