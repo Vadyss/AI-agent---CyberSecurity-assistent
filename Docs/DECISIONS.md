@@ -53,3 +53,9 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Why:** A forgotten variable must produce a server that does not start, not one that runs without authentication.
 - **Implementation:** The app is created by `uvicorn orchestrator.main:create_app --factory`, so configuration is validated at startup instead of at import. Migrations run in a one-shot `migrate` service before the backend starts. `POSTGRES_PASSWORD` has no default.
 - **Trade-off:** The `deploy` job on `main` now needs `POSTGRES_PASSWORD` (secret) and the `OIDC_*` variables configured in GitHub before it can start the stack.
+
+## D-009 Identity comes only from a verified provider token
+
+- **Decision:** oauth2-proxy authenticates users with OIDC and forwards the provider's ID token as `Authorization: Bearer`. The backend verifies that token itself: signature against the provider's JWKS, `iss`, `aud` (the proxy's client ID, plus `azp` when there are several audiences), `exp` and `iat`, and a fixed list of asymmetric algorithms. Plain identity headers such as `X-Forwarded-User` or `X-Forwarded-Email` are ignored.
+- **Why:** You asked that the backend reject identities from requests that did not pass through the proxy. A header can be forged by anyone who reaches the backend directly; a provider signature cannot. The backend and frontend are also not published on the host in production; only oauth2-proxy is.
+- **Details:** Keys are cached for 10 minutes. An unknown key ID triggers at most one refetch per 30 seconds, so forged key IDs cannot flood the provider. During a provider outage the cached keys keep working.
