@@ -288,6 +288,10 @@ class Gatekeeper:
         self.audit.append("rule_rejected", run_id, {"reason": reason, "attack_type": attack_type})
         self._lessons.record(run_id, attack_type, "analyst_rejected", reason, recipe)
 
+    def record_cancellation(self, run_id, reason):
+        require_run_id(run_id)
+        self.audit.append("run_cancelled", run_id, {"reason": reason})
+
     def record_failure(self, run_id, reason_code, reason, recipe=None):
         self.audit.append("run_failed", run_id, {"reason_code": reason_code, "reason": reason})
         if reason_code in {"RULE_FAILED", "VALIDATION_FAILED"}:

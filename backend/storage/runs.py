@@ -98,6 +98,13 @@ class RunRepository:
                 values["finished_at"] = utcnow()
             await session.execute(sa.update(Run).where(Run.id == run_id).values(**values))
 
+    async def cancel_queued(self, run_id: str) -> bool:
+        """Cancel a run that has not started; False if the dispatcher claimed it first."""
+        async with self.db.session() as session:
+            result = await session.execute(sa.update(Run).where(Run.id == run_id, Run.status == "queued").values(
+                status="cancelled", cancel_requested=True, finished_at=utcnow(), reason_code="CANCELLED"))
+            return result.rowcount == 1
+
     async def request_cancel(self, run_id: str) -> None:
         async with self.db.session() as session:
             await session.execute(sa.update(Run).where(Run.id == run_id).values(cancel_requested=True))

@@ -71,8 +71,9 @@ def test_run_interrupted_by_a_restart_is_closed_as_failed(clean_postgres, tmp_pa
         assert {r["run_id"]: r["status"] for r in second.get("/runs").json()["runs"]}[run_id] == "failed"
         last = second.get(f"/runs/{run_id}/events").json()["events"][-1]
         assert (last["type"], last["data"]["reason"]) == ("run_failed", RESTART_REASON)
-        # The tenant is free again.
-        assert second.post("/runs", json={"request": "detect ssh brute force"}).status_code == 202
+        # The interrupted run is retried automatically as a new run.
+        retries = [r for r in second.get("/runs").json()["runs"] if r["retry_of"] == run_id]
+        assert len(retries) == 1 and retries[0]["attempt"] == 2
 
 
 async def test_database_allows_one_active_run_per_tenant(database):

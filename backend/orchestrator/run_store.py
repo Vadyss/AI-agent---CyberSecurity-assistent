@@ -17,7 +17,7 @@ from orchestrator.models import RunInfo, RunStats
 
 PHASES = ("intake", "plan", "forge", "rule", "validation", "approval", "done")
 ACTIVE_STATUSES = {"running", "awaiting_approval"}
-FINISHED_STATUSES = {"approved", "rejected", "failed"}
+FINISHED_STATUSES = {"approved", "rejected", "failed", "cancelled"}
 
 
 def now_iso() -> str:
@@ -56,6 +56,10 @@ class RunState:
     request: str
     tenant_id: uuid.UUID | None = None
     created_by: str = "system"
+    attempt: int = 1
+    # Set by the pipeline for transient failures (sandbox, model provider outage).
+    retryable: bool = False
+    cancel_requested: bool = False
     status: str = "running"
     created_at: str = field(default_factory=now_iso)
     finished_at: str | None = None
@@ -86,25 +90,22 @@ class RunStore:
         self.lock = asyncio.Lock()
         self.max_runs = max_runs
 
-    async def create(self, request: str, tenant_id: uuid.UUID | None = None, created_by: str = "system") -> RunState:
-        async with self.lock:
-            # One active run per tenant: candidates of concurrent runs could collide.
-            if any(r.status in ACTIVE_STATUSES and r.tenant_id == tenant_id for r in self.runs.values()):
-                raise ApiError(409, "RUN_ALREADY_ACTIVE", "The previous run has not finished yet.")
-            while len(self.runs) >= self.max_runs:
-                oldest = next((r for r in self.runs.values() if r.status in FINISHED_STATUSES), None)
-                if oldest is None:
-                    raise ApiError(429, "TOO_MANY_RUNS", "Too many runs are active; try again later.")
-                if oldest.voice_task and not oldest.voice_task.done():
-                    oldest.voice_task.cancel()
-                del self.runs[oldest.run_id]
-            # 64 random bits: run IDs stay unique across the whole history in the database.
-            run_id = "run_" + secrets.token_hex(8)
-            while run_id in self.runs:
-                run_id = "run_" + secrets.token_hex(8)
-            run = RunState(run_id, request, tenant_id, created_by)
-            self.runs[run_id] = run
-            return run
+    def adopt(self, run_id: str, request: str, tenant_id: uuid.UUID, created_by: str, attempt: int = 1) -> RunState:
+        """Materialize a run the queue just claimed; the pipeline then emits run_started."""
+        self._evict()
+        run = RunState(run_id, request, tenant_id, created_by, attempt=attempt)
+        self.runs[run_id] = run
+        return run
+
+    def _evict(self) -> None:
+        # Finished runs stay in the database; memory only keeps recent ones.
+        while len(self.runs) >= self.max_runs:
+            oldest = next((r for r in self.runs.values() if r.status in FINISHED_STATUSES), None)
+            if oldest is None:
+                return
+            if oldest.voice_task and not oldest.voice_task.done():
+                oldest.voice_task.cancel()
+            del self.runs[oldest.run_id]
 
     def lookup(self, run_id: str) -> RunState:
         """Internal access without a tenant check; API handlers must use ``get``."""

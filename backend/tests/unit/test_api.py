@@ -53,9 +53,11 @@ def test_invalid_and_absent_ids(stub_client, run_id, endpoint):
 
 def test_intake_trim_unknown_fields_active_run_and_event_replay(stub_client):
     created = stub_client.post("/api/runs", json={"request": "  hello  ", "ignored": True})
-    assert created.status_code == 202
+    assert created.status_code == 202 and created.json()["status"] == "running"
     run_id = created.json()["run_id"]
-    assert_error(stub_client.post("/api/runs", json={"request": "another"}), 409, "RUN_ALREADY_ACTIVE")
+    # A second run of the same tenant waits in the queue instead of being refused.
+    waiting = stub_client.post("/api/runs", json={"request": "another"})
+    assert waiting.status_code == 202 and waiting.json()["status"] == "queued"
     run = stub_client.app.state.store.lookup(run_id)
     assert run.request == "hello"
     assert stub_client.get(f"/api/runs/{run_id}/events").json()["events"][0]["data"]["request"] == "hello"
@@ -63,7 +65,8 @@ def test_intake_trim_unknown_fields_active_run_and_event_replay(stub_client):
     assert_error(stub_client.get(f"/api/runs/{run_id}/audio"), 404, "AUDIO_NOT_FOUND")
     assert_error(stub_client.post(f"/api/runs/{run_id}/approve", json={}), 409, "NOT_AWAITING_APPROVAL")
     stub_client.portal.call(prepare_approval, stub_client.app, run_id)
-    assert_error(stub_client.post("/api/runs", json={"request": "another"}), 409, "RUN_ALREADY_ACTIVE")
+    statuses = {r["run_id"]: r["status"] for r in stub_client.get("/api/runs").json()["runs"]}
+    assert statuses == {run_id: "awaiting_approval", waiting.json()["run_id"]: "queued"}
 
 
 @pytest.mark.parametrize("value", ["-1", "1.5", "nan", "true", "", "abc", "١", "1e2"])

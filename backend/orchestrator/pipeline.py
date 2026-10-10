@@ -164,13 +164,24 @@ async def run_pipeline(run, gk, roles, emitter, settings, voice=None):
     except LlmBudgetExceeded:
         await fail("LLM_ERROR", "The language model call budget was exceeded.")
     except LlmError:
+        run.retryable = True  # Provider outages are usually transient.
         await fail("LLM_ERROR")
     except SandboxError:
+        run.retryable = True
         await fail("SANDBOX_ERROR")
     except asyncio.TimeoutError:
         await fail("INTERNAL_ERROR", "The run exceeded its time limit.")
     except asyncio.CancelledError:
-        await fail("INTERNAL_ERROR", "The run was interrupted.")
+        if getattr(run, "cancel_requested", False) and run.status == "running":
+            if not run.events:
+                await emitter.emit(run, "run_started", "intake", {"request": run.request})
+            await finish_usage()
+            await emitter.emit(run, "run_cancelled", context["phase"], {"reason": "Cancelled on request."})
+            record = getattr(gk, "record_cancellation", None)
+            if record:
+                record(run.run_id, "Cancelled on request.")
+        else:
+            await fail("INTERNAL_ERROR", "The run was interrupted.")
         raise
     except Exception as exc:
         logger.error("Run failed (%s).", type(exc).__name__)
@@ -181,7 +192,7 @@ async def run_pipeline(run, gk, roles, emitter, settings, voice=None):
         try:
             if run.status == "running":
                 await fail("INTERNAL_ERROR")
-            if run.status == "failed":
+            if run.status in {"failed", "cancelled"}:
                 await gk.discard(run.run_id)
         except Exception:
             logger.error("Failed run cleanup failed.")

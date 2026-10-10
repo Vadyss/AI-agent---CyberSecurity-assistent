@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import secrets
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
@@ -26,15 +27,29 @@ from orchestrator.ws import WebSocketHub
 
 CONTRACT_VERSION = 1
 RUN_ID = re.compile(r"run_[a-z0-9]{4,32}")
-RESTART_REASON = "The backend restarted during this run. Start it again."
+RESTART_REASON = "The backend restarted during this run."
+RETRY_BACKOFF_S = 30
 
 
-async def recover_unfinished_runs(repository) -> None:
-    """Close runs a previous process left open; their in-memory state is gone."""
+def new_run_id() -> str:
+    # 64 random bits: run IDs stay unique across the whole history in the database.
+    return "run_" + secrets.token_hex(8)
+
+
+async def recover_unfinished_runs(repository) -> list:
+    """Close runs a previous process left open; returns those that were mid-flight.
+
+    Their in-memory state (gatekeeper checks, candidates) is gone, so they
+    cannot continue. Runs that were still running are retried as new runs;
+    runs awaiting approval must be started again by the analyst.
+    """
     from orchestrator.events import render_message
     from orchestrator.run_store import now_iso
 
+    interrupted = []
     for record in await repository.unfinished():
+        if record.status == "running":
+            interrupted.append(record)
         events = await repository.events(record.id)
         if not events:
             await repository.set_status(record.id, "failed", reason_code="INTERNAL_ERROR", finished=True)
@@ -46,6 +61,7 @@ async def recover_unfinished_runs(repository) -> None:
         from datetime import datetime, timezone
         await repository.record_event(record.id, event, status="failed", finished_at=datetime.now(timezone.utc))
         logging.getLogger(__name__).warning("Run %s was interrupted by a restart and marked failed.", record.id)
+    return interrupted
 
 
 def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipeline_runner=None, voice=None,
@@ -100,8 +116,19 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                 available = False
             if not available:
                 logging.getLogger(__name__).warning("Sandbox is unavailable; the run will end with SANDBOX_ERROR.")
+            from orchestrator.dispatcher import RunDispatcher
+
+            app.state.dispatcher = RunDispatcher(app.state.run_repository, start_run,
+                                                 concurrency=config.worker_concurrency)
+            for record in app.state.interrupted:
+                if record.attempt < config.run_max_attempts:
+                    await schedule_retry(record.id, record.tenant_id, record.created_by, record.request,
+                                         record.attempt, delay_s=0)
+            app.state.dispatcher.start_background()
             yield
         finally:
+            if app.state.dispatcher is not None:
+                await app.state.dispatcher.close()
             for resource in (app.state.store, app.state.hub, sandbox_client, app.state.voice, app.state.roles):
                 close = getattr(resource, "close", None)
                 if close:
@@ -147,7 +174,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
 
         app.state.run_repository = RunRepository(db)
         app.state.emitter.repository = app.state.run_repository
-        await recover_unfinished_runs(app.state.run_repository)
+        app.state.interrupted = await recover_unfinished_runs(app.state.run_repository)
 
     app = FastAPI(title="Frankenstein", lifespan=lifespan, docs_url=None, redoc_url=None)
     register_handlers(app)
@@ -158,6 +185,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.state.gatekeepers = None
     app.state.auth = None
     app.state.run_repository = None
+    app.state.dispatcher = None
+    app.state.interrupted = []
     from identity.ratelimit import RateLimiter
 
     app.state.rate_limits = RateLimiter(config.rate_limit_per_minute)
@@ -181,6 +210,52 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                 "tenant": {"id": str(principal.tenant_id), "slug": principal.tenant_slug},
                 "permissions": sorted(p.value for p in Permission if principal.can(p))}
 
+    async def start_run(record):
+        """Called by the dispatcher for a claimed run: start its pipeline as the run's creator."""
+        run = app.state.store.adopt(record.id, record.request, record.tenant_id, record.created_by, record.attempt)
+        tenant_gatekeeper = await app.state.gatekeepers.get(record.tenant_id)
+        run_settings = replace(config, data_dir=app.state.gatekeepers.data_dir(record.tenant_id))
+        token = AUDIT_ACTOR.set(record.created_by)
+        try:
+            run.task = asyncio.create_task(execute(run, tenant_gatekeeper, run_settings))
+        finally:
+            AUDIT_ACTOR.reset(token)
+        return run.task
+
+    async def execute(run, tenant_gatekeeper, run_settings):
+        pipeline = pipeline_runner
+        if pipeline is None:
+            from orchestrator.pipeline import run_pipeline
+
+            pipeline = run_pipeline
+        try:
+            await pipeline(run, tenant_gatekeeper, app.state.roles, app.state.emitter, run_settings, app.state.voice)
+        finally:
+            if run.cancel_requested and run.status == "running":
+                # Whatever the pipeline did, a cancelled run must end in a terminal state.
+                try:
+                    if not run.events:
+                        await app.state.emitter.emit(run, "run_started", "intake", {"request": run.request})
+                    await app.state.emitter.emit(run, "run_cancelled", run.phase, {"reason": "Cancelled on request."})
+                except Exception as error:
+                    logging.getLogger(__name__).error("Run %s could not be closed after cancellation (%s).",
+                                                      run.run_id, type(error).__name__)
+            if run.status == "failed" and run.retryable and not run.cancel_requested \
+                    and run.attempt < config.run_max_attempts:
+                await schedule_retry(run.run_id, run.tenant_id, run.created_by, run.request, run.attempt)
+
+    async def schedule_retry(run_id, tenant_id, created_by, request, attempt, *, delay_s=None):
+        """Queue a fresh attempt as a new run that points back to the failed one."""
+        from datetime import datetime, timedelta, timezone
+
+        delay = RETRY_BACKOFF_S * attempt if delay_s is None else delay_s
+        retry = await app.state.run_repository.create(
+            run_id=new_run_id(), tenant_id=tenant_id, created_by=created_by, request=request, status="queued",
+            attempt=attempt + 1, retry_of=run_id, not_before=datetime.now(timezone.utc) + timedelta(seconds=delay))
+        logging.getLogger(__name__).warning("Run %s failed transiently; retry %s queued.", run_id, retry.id)
+        app.state.dispatcher.wake()
+        return retry
+
     @router.post("/runs", status_code=202)
     async def create_run(body: CreateRunBody, principal: Principal = runner):
         text = body.request.strip()
@@ -188,28 +263,44 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             raise ApiError(400, "INVALID_REQUEST", "The request must contain 1 to 2000 characters.")
         # A tenant-wide cap on new runs; each run can spend real model budget.
         app.state.run_limits.check(f"tenant:{principal.tenant_id}")
-        tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
-        run = await app.state.store.create(text, principal.tenant_id, principal.actor)
-        try:
-            await app.state.run_repository.create(run_id=run.run_id, tenant_id=principal.tenant_id,
-                                                  created_by=principal.actor, request=text, status="running")
-        except Exception:
-            app.state.store.runs.pop(run.run_id, None)
-            raise
-        pipeline = pipeline_runner
-        if pipeline is None:
-            from orchestrator.pipeline import run_pipeline
+        queued = await app.state.run_repository.count(principal.tenant_id, statuses=("queued",))
+        if queued >= config.max_queued_runs_per_tenant:
+            raise ApiError(429, "QUEUE_FULL", "Too many runs are waiting; try again when one has finished.")
+        record = await app.state.run_repository.create(run_id=new_run_id(), tenant_id=principal.tenant_id,
+                                                       created_by=principal.actor, request=text)
+        # Start right away when a worker is free; otherwise the run waits in the queue.
+        started = await app.state.dispatcher.fill()
+        return {"run_id": record.id, "status": "running" if record.id in started else "queued"}
 
-            pipeline = run_pipeline
-        run_settings = replace(config, data_dir=app.state.gatekeepers.data_dir(principal.tenant_id))
-        # The task copies this context, so every audit record of the run names its actor.
-        token = AUDIT_ACTOR.set(principal.actor)
-        try:
-            run.task = asyncio.create_task(pipeline(run, tenant_gatekeeper, app.state.roles,
-                                                    app.state.emitter, run_settings, app.state.voice))
-        finally:
-            AUDIT_ACTOR.reset(token)
-        return {"run_id": run.run_id, "status": "running"}
+    @router.post("/runs/{run_id:path}/cancel")
+    async def cancel_run(run_id: str, principal: Principal = runner):
+        record = await stored_run(run_id, principal)
+        if record.status == "queued":
+            await app.state.run_repository.cancel_queued(record.id)
+            refreshed = await app.state.run_repository.get(record.id, principal.tenant_id)
+            if refreshed.status == "cancelled":
+                return {"status": "cancelled"}
+            record = refreshed  # The dispatcher claimed it meanwhile.
+        run = app.state.store.find(run_id, principal.tenant_id)
+        if record.status != "running" or run is None or run.task is None:
+            raise ApiError(409, "NOT_CANCELLABLE", "Only queued or running runs can be cancelled; "
+                                                   "reject a run that awaits approval.")
+        run.cancel_requested = True
+        await app.state.run_repository.request_cancel(run.run_id)
+        run.task.cancel()
+        await asyncio.wait([run.task], timeout=10)
+        return {"status": run.status}
+
+    @router.post("/runs/{run_id:path}/retry", status_code=202)
+    async def retry_run(run_id: str, principal: Principal = runner):
+        record = await stored_run(run_id, principal)
+        if record.status not in {"failed", "cancelled"}:
+            raise ApiError(409, "NOT_RETRYABLE", "Only failed or cancelled runs can be retried.")
+        app.state.run_limits.check(f"tenant:{principal.tenant_id}")
+        retry = await schedule_retry(record.id, principal.tenant_id, principal.actor, record.request,
+                                     record.attempt, delay_s=0)
+        started = await app.state.dispatcher.fill()
+        return {"run_id": retry.id, "status": "running" if retry.id in started else "queued"}
 
     async def stored_run(run_id: str, principal: Principal):
         """The tenant's run from the database; another tenant's run is reported as missing."""

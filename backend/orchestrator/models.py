@@ -190,6 +190,10 @@ class RunFailedData(ContractModel):
     reason: str
 
 
+class RunCancelledData(ContractModel):
+    reason: str
+
+
 class UsageRecordData(ContractModel):
     run_id: str = Field(pattern=r"^run_[a-z0-9]{4,32}$")
     call_id: int = Field(ge=1)
@@ -260,6 +264,7 @@ DATA_MODELS = {
     "awaiting_approval": AwaitingApprovalData, "skill_installed": SkillInstalledData,
     "rule_approved": RuleApprovedData, "rule_rejected": RuleRejectedData,
     "policy_rejected": PolicyRejectedData, "run_failed": RunFailedData,
+    "run_cancelled": RunCancelledData,
 }
 
 
@@ -268,7 +273,7 @@ class EventEnvelope(ContractModel):
                   "forge_started", "skill_tests_failed", "skill_candidate_ready",
                   "rule_drafted", "rule_evaluated", "validation_done", "summary",
                   "voice_ready", "awaiting_approval", "skill_installed", "rule_approved",
-                  "rule_rejected", "policy_rejected", "run_failed", "llm_usage"]
+                  "rule_rejected", "policy_rejected", "run_failed", "run_cancelled", "llm_usage"]
     run_id: str = Field(pattern=r"^run_[a-z0-9]{4,32}$")
     seq: int = Field(ge=1)
     timestamp: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")

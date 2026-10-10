@@ -12,9 +12,10 @@ from orchestrator.text import clip, safe_name
 from orchestrator.ws import WebSocketHub
 
 EVENT_TYPES = frozenset(DATA_MODELS)
-TERMINAL_TYPES = {"rule_approved", "rule_rejected", "run_failed"}
+TERMINAL_TYPES = {"rule_approved", "rule_rejected", "run_failed", "run_cancelled"}
 STATUS_BY_EVENT = {"run_started": "running", "awaiting_approval": "awaiting_approval",
-                   "rule_approved": "approved", "rule_rejected": "rejected", "run_failed": "failed"}
+                   "rule_approved": "approved", "rule_rejected": "rejected", "run_failed": "failed",
+                   "run_cancelled": "cancelled"}
 EVENT_PHASE = {
     "run_started": "intake", "plan_ready": "plan", "skill_reused": "plan", "capability_missing": "plan",
     "forge_started": "forge", "skill_tests_failed": "forge", "skill_candidate_ready": "forge",
@@ -72,6 +73,8 @@ def render_message(event_type: str, data: dict) -> str:
         name = f" {safe_name(data['name'])}" if data["name"] else ""
         more = f" and another {len(data['violations']) - 1}" if len(data["violations"]) > 1 else ""
         text = f"The gatekeeper rejected {target}{name}: {clip(data['violations'][0]['code'], 60)}{more}."
+    elif event_type == "run_cancelled":
+        text = "The run was cancelled."
     else:
         text = f"Run failed ({data['reason_code']})."
     return clip(text, 200)
