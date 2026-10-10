@@ -38,3 +38,11 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Decision:** The sandbox container runs with `network_mode: none`. The supervisor listens on `/run/toolsmith/sandbox.sock` on a volume shared only with the backend. The socket directory is `root:10001`, mode `0750`, so the backend (GID 10001) can connect and job UIDs cannot even reach the path.
 - **Why:** Previously the sandbox shared an internal Docker network with the backend. Code that escaped the Python guards could then send requests to the backend API. With no network interface there is nothing to reach, not even other containers.
 - **Trade-off:** Local development without Docker still uses TCP (`SANDBOX_URL`, no `SANDBOX_SOCKET`). That mode is for development only and is logged as such.
+
+## D-007 Storage: PostgreSQL for metadata, files for artifacts and audit
+
+- **Decision:** PostgreSQL (SQLAlchemy 2 async with psycopg 3, Alembic migrations) stores tenants, users, memberships, invitations, API keys, runs, run events and LLM usage. Skill code, tests, approved rules and the hash-chained audit log stay on the `/data` volume, under one directory per tenant.
+- **Why:** Relational data needs constraints, transactions and queries (quotas, queue, RBAC). Skill artifacts are already content-addressed and integrity-checked by the gatekeeper registry. Moving them into the database would rewrite proven code without a security gain.
+- **Order:** The database foundation (a P2 item) is built before P1, because identities, tenants and API keys need it.
+- **Testing:** One SQL implementation. Fast tests use in-memory SQLite. `backend/scripts/test.sh` also starts a throwaway PostgreSQL server, and the storage tests run against both. A test checks that the migrations match the models and downgrade cleanly.
+- **Trade-off:** Backups must cover both PostgreSQL and the `/data` volume (see the operations guide).
