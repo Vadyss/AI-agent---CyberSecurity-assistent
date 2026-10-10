@@ -69,11 +69,16 @@ def test_sandbox_compose_is_isolated():
     sandbox = compose["services"]["sandbox"]
     assert sandbox["read_only"] is True
     assert "ALL" in sandbox["cap_drop"]
+    # Only the capabilities the supervisor needs to switch to and clean up job UIDs.
+    assert sorted(sandbox.get("cap_add", [])) == ["KILL", "SETGID", "SETUID"]
     assert "no-new-privileges:true" in sandbox["security_opt"]
-    assert sandbox.get("volumes", []) == []
+    assert sandbox["init"] is True
+    # The only mount is the socket volume shared with the backend.
+    assert sandbox.get("volumes", []) == ["sandbox-socket:/run/toolsmith"]
     assert not sandbox.get("ports")
-    for net in sandbox["networks"]:
-        assert compose["networks"][net]["internal"] is True
+    assert sandbox["network_mode"] == "none" and "networks" not in sandbox
+    assert sandbox["environment"]["SANDBOX_ISOLATION"] == "uid"
+    assert any("mode=0700" in mount for mount in sandbox["tmpfs"])
     env = sandbox.get("environment", {})
     for name in env:
         assert not any(secret in name.upper() for secret in ("KEY", "TOKEN", "SECRET"))

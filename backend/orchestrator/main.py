@@ -36,7 +36,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             if sandbox_client is None or gatekeeper is None:
                 from gatekeeper.api import Gatekeeper, SandboxClient
 
-                sandbox_client = sandbox_client or SandboxClient(config.sandbox_url, timeout_s=config.sandbox_timeout_s)
+                sandbox_client = sandbox_client or SandboxClient(config.sandbox_url, timeout_s=config.sandbox_timeout_s,
+                                                                 uds=config.sandbox_socket or None)
 
                 async def examine(description, log_format):
                     return await app.state.examiner.generate(description, log_format)

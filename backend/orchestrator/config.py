@@ -34,6 +34,7 @@ class Settings:
     mock_scenario: str = ""
     mock_delay_ms: int = 400
     sandbox_url: str = "http://sandbox:8000"
+    sandbox_socket: str = ""
     sandbox_timeout_s: float = 30
     data_dir: Path = Path("/data")
     datasets_dir: Path = BACKEND_ROOT / "datasets"

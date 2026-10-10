@@ -32,3 +32,9 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **What enforces it:** read-only root file system; no network (D-006); all capabilities dropped except `SETUID`, `SETGID` and `KILL` for the supervisor; `no-new-privileges`; job processes have zero capabilities; per-job `RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NOFILE`, `RLIMIT_NPROC=16` and `RLIMIT_FSIZE=0` (no file writes at all); container `pids_limit`, memory and CPU limits; `/tmp` readable only by root.
 - **Fairness:** At most `SANDBOX_MAX_JOBS` jobs run at once, and at most `SANDBOX_MAX_JOBS_PER_TENANT` of them for one tenant.
 - **Trade-off:** The supervisor process starts as UID 0 (with the three capabilities above) because it must switch UIDs. Untrusted code never runs as UID 0. The kernel is still shared with the host, so a kernel exploit would cross the boundary; gVisor (`runtime: runsc`) can be added later without code changes.
+
+## D-006 The sandbox has no network; the backend uses a Unix socket
+
+- **Decision:** The sandbox container runs with `network_mode: none`. The supervisor listens on `/run/toolsmith/sandbox.sock` on a volume shared only with the backend. The socket directory is `root:10001`, mode `0750`, so the backend (GID 10001) can connect and job UIDs cannot even reach the path.
+- **Why:** Previously the sandbox shared an internal Docker network with the backend. Code that escaped the Python guards could then send requests to the backend API. With no network interface there is nothing to reach, not even other containers.
+- **Trade-off:** Local development without Docker still uses TCP (`SANDBOX_URL`, no `SANDBOX_SOCKET`). That mode is for development only and is logged as such.

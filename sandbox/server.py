@@ -337,13 +337,50 @@ async def execute(request: Request) -> dict[str, Any]:
     return await execute_job(job)
 
 
+def prepare_socket_dir(socket_path: str, client_gid: int) -> None:
+    """Only the backend's group may reach the socket; job UIDs cannot even traverse."""
+    folder = Path(socket_path).parent
+    if folder.is_symlink() or not folder.is_dir():
+        raise SystemExit("The sandbox socket directory must be a real directory.")
+    # chgrp works without CAP_CHOWN because compose adds the client group to
+    # the supervisor's supplementary groups.
+    os.chown(folder, os.geteuid(), client_gid)
+    os.chmod(folder, 0o750)
+
+
+def healthy(socket_path: str | None) -> bool:
+    import http.client
+    import socket
+
+    try:
+        if socket_path:
+            connection = http.client.HTTPConnection("sandbox", timeout=2)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            sock.connect(socket_path)
+            connection.sock = sock
+        else:
+            connection = http.client.HTTPConnection("127.0.0.1", int(os.environ.get("SANDBOX_PORT", "8000")), timeout=2)
+        connection.request("GET", "/health")
+        return connection.getresponse().status == 200
+    except OSError:
+        return False
+
+
 def main() -> None:
+    socket_path = os.environ.get("SANDBOX_SOCKET") or None
+    if sys.argv[1:] == ["--health"]:
+        raise SystemExit(0 if healthy(socket_path) else 1)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     preflight()
     import uvicorn
 
-    uvicorn.run(app, host=os.environ.get("SANDBOX_HOST", "0.0.0.0"),
-                port=int(os.environ.get("SANDBOX_PORT", "8000")), access_log=False)
+    if socket_path:
+        prepare_socket_dir(socket_path, int(os.environ.get("SANDBOX_CLIENT_GID", "10001")))
+        uvicorn.run(app, uds=socket_path, access_log=False)
+    else:
+        uvicorn.run(app, host=os.environ.get("SANDBOX_HOST", "0.0.0.0"),
+                    port=int(os.environ.get("SANDBOX_PORT", "8000")), access_log=False)
 
 
 if __name__ == "__main__":

@@ -21,8 +21,11 @@ def test_ci_keeps_all_test_suites_and_never_deletes_deployment_volumes():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     assert {"test", "frontend-test", "integration", "deploy"} <= workflow["jobs"].keys()
     suites = str(workflow["jobs"]["test"])
-    assert "../sandbox/requirements.txt" in suites
-    assert "../apify/llm-relay/tests" in suites
+    # Backend and sandbox suites run through the shared Docker test script.
+    assert "sh backend/scripts/test.sh" in suites
+    script = (ROOT / "backend/scripts/test.sh").read_text()
+    assert "../sandbox/requirements.txt" in script and "../sandbox/tests" in script
+    assert "apify/llm-relay" in suites and "pytest tests" in suites
     deploy = str(workflow["jobs"]["deploy"])
     assert "down -v" not in deploy and "--volumes" not in deploy
     for check in ("APIFY_TOKEN", "http://1.1.1.1", "touch /app/test", "/health"):

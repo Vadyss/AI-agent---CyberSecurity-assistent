@@ -48,10 +48,13 @@ def validate_response(value: Any) -> dict[str, Any]:
 
 class SandboxClient:
     def __init__(self, base_url: str = "http://sandbox:8000", timeout_s: float = 30,
-                 *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 *, transport: httpx.AsyncBaseTransport | None = None, uds: str | None = None) -> None:
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("The client timeout must be positive.")
         self.timeout_s = timeout_s
+        if transport is None and uds:
+            # The sandbox has no network at all; it listens on a Unix socket.
+            transport = httpx.AsyncHTTPTransport(uds=uds)
         self.client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout_s,
                                         transport=transport, trust_env=False)
 

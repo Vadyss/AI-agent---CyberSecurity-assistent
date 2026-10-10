@@ -17,9 +17,6 @@ services:
     build: ./backend
     ports:
       - "${BACKEND_BIND_HOST:-127.0.0.1}:8000:8000"
-    networks:
-      - default
-      - sandbox_net
     restart: unless-stopped
     environment:
       APIFY_TOKEN: "${APIFY_TOKEN:-}"
@@ -41,7 +38,8 @@ services:
       LLM_MAX_CALLS_PER_RUN: "${LLM_MAX_CALLS_PER_RUN:-25}"
       MOCK_SCENARIO: "${MOCK_SCENARIO:-}"
       MOCK_DELAY_MS: "${MOCK_DELAY_MS:-400}"
-      SANDBOX_URL: http://sandbox:8000
+      SANDBOX_URL: http://sandbox
+      SANDBOX_SOCKET: /run/toolsmith/sandbox.sock
       SANDBOX_TIMEOUT_S: "${SANDBOX_TIMEOUT_S:-30}"
       DATA_DIR: /data
       DATASETS_DIR: /app/datasets
@@ -56,6 +54,7 @@ services:
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
     volumes:
       - frankenstein-data:/data
+      - sandbox-socket:/run/toolsmith
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777,noexec,nosuid
@@ -69,8 +68,9 @@ services:
 
   sandbox:
     build: ./sandbox
-    networks:
-      - sandbox_net
+    # No network interface at all: the backend talks to the supervisor over a
+    # Unix socket on a shared volume, so submitted code has nothing to reach.
+    network_mode: none
     restart: unless-stopped
     # tini reaps orphans, so zombie processes never pin a job UID.
     init: true
@@ -87,17 +87,22 @@ services:
       - KILL
     security_opt:
       - no-new-privileges:true
+    # Membership in the backend's group lets the supervisor restrict the
+    # socket directory to that group; job UIDs are not members.
+    group_add:
+      - "10001"
+    volumes:
+      - sandbox-socket:/run/toolsmith
     environment:
       SANDBOX_ISOLATION: uid
+      SANDBOX_SOCKET: /run/toolsmith/sandbox.sock
+      SANDBOX_CLIENT_GID: "10001"
       SANDBOX_MAX_JOBS: "${SANDBOX_MAX_JOBS:-2}"
       SANDBOX_MAX_JOBS_PER_TENANT: "${SANDBOX_MAX_JOBS_PER_TENANT:-1}"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100
 
-networks:
-  sandbox_net:
-    internal: true
-
 volumes:
   frankenstein-data: {}
+  sandbox-socket: {}
