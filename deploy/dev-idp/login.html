@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Development-only sign-in page of the mock identity provider. Anyone can be anyone here. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Toolsmith development sign-in</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: #1d1d1f; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: .5rem; font: inherit; }
+    textarea { height: 6rem; font-family: ui-monospace, monospace; }
+    button { margin-top: 1.5rem; padding: .6rem 1.2rem; font: inherit; }
+    .warning { background: #fff4e5; border: 1px solid #f0b37e; padding: .75rem; border-radius: .25rem; }
+  </style>
+</head>
+<body>
+  <h1>Development sign-in</h1>
+  <p class="warning">This throwaway identity provider accepts any user. It exists only for local development.</p>
+  <form method="post">
+    <label for="username">User name (token subject)</label>
+    <input id="username" name="username" value="dev" required>
+    <label for="claims">Claims (JSON)</label>
+    <textarea id="claims" name="claims">{"email": "dev@example.test", "email_verified": true, "name": "Dev Admin"}</textarea>
+    <button type="submit">Sign in</button>
+  </form>
+  <p>Other users: change the user name and the e-mail, then invite that e-mail from the admin account.</p>
+</body>
+</html>

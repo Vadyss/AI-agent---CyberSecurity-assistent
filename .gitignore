@@ -44,3 +44,6 @@ tmp/
 /backend/.data/
 *.mp3
 *.wav
+
+# CI-only generated secrets
+.ci.env

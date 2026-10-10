@@ -416,5 +416,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     router.include_router(build_admin_router(config))
     app.include_router(router)
     app.include_router(router, prefix="/api")
+    # oauth2-proxy routes /m2m/ (API-key clients) here without a sign-in.
+    app.include_router(router, prefix="/m2m")
     return app
 

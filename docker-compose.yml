@@ -1,14 +1,55 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 name: hackathon
 
+# Production layout: oauth2-proxy is the only published service. It signs
+# users in with your OIDC provider and forwards their ID token to the frontend
+# and the API. Put a TLS-terminating reverse proxy in front of port 4180.
 services:
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+    restart: unless-stopped
+    ports:
+      - "${PUBLIC_BIND:-127.0.0.1}:4180:4180"
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=${OIDC_ISSUER:-}
+      - --client-id=${OIDC_AUDIENCE:-}
+      - --redirect-url=${PUBLIC_URL:-}/oauth2/callback
+      - --scope=openid email profile
+      - --code-challenge-method=S256
+      - --email-domain=*
+      - --cookie-secure=true
+      - --cookie-refresh=10m
+      - --reverse-proxy=true
+      - --skip-provider-button=true
+      # The backend verifies the ID token itself; no plain identity headers.
+      - --pass-authorization-header=true
+      - --pass-user-headers=false
+      - --set-xauthrequest=false
+      - --upstream=http://frontend:8080/
+      # Programmatic clients use X-API-Key on /m2m/; the backend checks the key.
+      - --upstream=http://backend:8000/m2m/
+      - --skip-auth-route=^/m2m/
+      - --upstream-timeout=60s
+    environment:
+      OAUTH2_PROXY_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
+      OAUTH2_PROXY_COOKIE_SECRET: "${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET in .env (scripts/bootstrap-env.sh creates one)}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - frontend
+      - backend
+
   frontend:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://127.0.0.1:8000}
-    ports:
-      - "3000:8080"
+        # The browser reaches the API through oauth2-proxy, on the same origin.
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-${PUBLIC_URL:-http://localhost:4180}/api}
     depends_on:
       - backend
     restart: unless-stopped
@@ -49,8 +90,7 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "${BACKEND_BIND_HOST:-127.0.0.1}:8000:8000"
+    # Not published: only oauth2-proxy (and the frontend's nginx) reach it.
     restart: unless-stopped
     environment:
       APIFY_TOKEN: "${APIFY_TOKEN:-}"
@@ -84,7 +124,9 @@ services:
       ELEVENLABS_MODEL_ID: "${ELEVENLABS_MODEL_ID:-eleven_multilingual_v2}"
       EXAMINER_ENABLED: "${EXAMINER_ENABLED:-false}"
       RUN_TIMEOUT_S: "${RUN_TIMEOUT_S:-1500}"
-      CORS_ORIGINS: "${CORS_ORIGINS:-}"
+      # Browser origins allowed for CORS and WebSocket handshakes (cross-site
+      # WebSocket hijacking protection): the public URL of oauth2-proxy.
+      CORS_ORIGINS: "${CORS_ORIGINS:-${PUBLIC_URL:-}}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       ENVIRONMENT: "${ENVIRONMENT:-production}"
       DATABASE_URL: "postgresql+psycopg://toolsmith:${POSTGRES_PASSWORD}@postgres:5432/toolsmith"
