@@ -139,7 +139,7 @@ def run(inputs, params):
     ("def run(inputs, params):\n    raise ValueError('x')", 2, "error"),
     ("def run(inputs, params):\n    while True:\n        pass", 0.15, "timeout"),
 ])
-def test_clean_child_environment_limits_and_workdir_cleanup(monkeypatch, code, timeout, status):
+def test_clean_child_environment_and_pipe_transport(monkeypatch, code, timeout, status):
     monkeypatch.setenv("APIFY_TOKEN", "test-secret-that-must-not-pass")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "another-secret")
     original_popen = subprocess.Popen
@@ -155,8 +155,11 @@ def test_clean_child_environment_limits_and_workdir_cleanup(monkeypatch, code, t
     spawn = observed[0]
     assert spawn["env"] == {"PATH": os.defpath}
     assert spawn["start_new_session"] is True
-    assert callable(spawn["preexec_fn"])
-    assert not Path(spawn["cwd"]).exists()
+    # preexec_fn is unsafe in a threaded server; limits are applied by the runner.
+    assert "preexec_fn" not in spawn
+    # Jobs travel through pipes, so no job file is ever written to disk.
+    assert spawn["cwd"] == "/"
+    assert spawn["stdin"] == subprocess.PIPE and spawn["stdout"] == subprocess.PIPE
 
 
 def test_no_more_than_two_real_children_at_a_time(monkeypatch):
@@ -167,11 +170,13 @@ def test_no_more_than_two_real_children_at_a_time(monkeypatch):
     class TrackedProcess:
         def __init__(self, *args, **kwargs):
             self.process = original_popen(*args, **kwargs)
-            self.pid = self.process.pid
             self.done = False
             with lock:
                 counts["active"] += 1
                 counts["peak"] = max(counts["peak"], counts["active"])
+
+        def __getattr__(self, name):
+            return getattr(self.process, name)
 
         def wait(self, *args, **kwargs):
             result = self.process.wait(*args, **kwargs)
@@ -190,16 +195,39 @@ def test_no_more_than_two_real_children_at_a_time(monkeypatch):
 
 
 def test_real_resource_limits_in_child(monkeypatch, tmp_path):
-    # A trusted probe replaces the runner solely in this test, then is subject
-    # to exactly the same server subprocess limits as submitted code.
+    # A trusted probe replaces the runner solely in this test. It applies the
+    # runner's own limit function with the arguments the server passes, then
+    # reports what the kernel actually enforces in the child.
+    runner_dir = Path(server.RUNNER_PATH).parent
     probe = tmp_path / "probe.py"
-    probe.write_text("""import json, pathlib, resource, sys
-limits = [resource.getrlimit(k)[0] for k in [resource.RLIMIT_CPU, resource.RLIMIT_AS, resource.RLIMIT_FSIZE, resource.RLIMIT_NOFILE, resource.RLIMIT_CORE]]
-result = dict(status='ok', result=limits, tests=dict(total=0, failed=0, failures=[]), error=None, duration_ms=0)
-pathlib.Path(sys.argv[1], 'result.json').write_text(json.dumps(result))
+    probe.write_text(f"""import json, os, resource, sys
+sys.path.insert(0, {str(runner_dir)!r})
+import runner
+runner.apply_limits(int(sys.argv[1]), sys.argv[2] == "1")
+kinds = [resource.RLIMIT_CPU, resource.RLIMIT_AS, resource.RLIMIT_FSIZE, resource.RLIMIT_NOFILE, resource.RLIMIT_CORE]
+result = dict(status='ok', result=[resource.getrlimit(k)[0] for k in kinds],
+              tests=dict(total=0, failed=0, failures=[]), error=None, duration_ms=0)
+os.read(0, 10_000_000)
+os.write(1, json.dumps(result).encode())
 """)
     monkeypatch.setattr(server, "RUNNER_PATH", probe)
-    assert server.execute_job_sync(job(timeout_s=2))["result"] == [3, 256 * 1024 * 1024, 10_000_000, 64, 0]
+    assert server.execute_job_sync(job(timeout_s=2))["result"] == [3, 256 * 1024 * 1024, 0, 64, 0]
+
+
+def test_skill_output_cannot_corrupt_result_pipe():
+    # print() is discarded in-process; the runner also points fds 1 and 2 at
+    # /dev/null, so even raw writes to stdout cannot reach the result pipe.
+    code = "def run(inputs, params):\n    print('{\"status\": \"ok\"}' * 100)\n    return [1]\n"
+    result = execute(code)
+    assert result["status"] == "ok", result
+    assert result["result"] == [1]
+
+
+def test_large_input_is_streamed_without_deadlock():
+    lines = ["x" * 1000] * 4000  # About 4 MB: far larger than a pipe buffer.
+    result = execute("def run(inputs, params):\n    return [len(inputs)]\n", inputs=lines, timeout_s=10)
+    assert result["status"] == "ok", result
+    assert result["result"] == [4000]
 
 
 def test_each_job_has_fresh_module_state():

@@ -10,13 +10,15 @@ import dis
 import importlib
 import json
 import os
-from pathlib import Path
 import re
+import resource
 import sys
 import types
 from typing import Any
 
 MAX_OUTPUT_BYTES = 10_000_000
+MEMORY_BYTES = 256 * 1024 * 1024
+MAX_INPUT_BYTES = 8_000_000
 _ORIGINAL_OPEN = builtins.open
 _ORIGINAL_IMPORT = builtins.__import__
 _SOURCES: frozenset[str] = frozenset()
@@ -70,10 +72,15 @@ def _runtime_ast_check(source: str, filename: str) -> ast.Module:
     return tree
 
 
-def _load_module(name: str, workdir: Path, safe_builtins: dict[str, Any]) -> types.ModuleType:
-    filename = str(workdir / f"{name}.py")
-    with _ORIGINAL_OPEN(filename, encoding="utf-8") as file:
-        tree = _runtime_ast_check(file.read(), filename)
+def _filename(name: str) -> str:
+    # Virtual path: sources never touch the disk, and the audit hook uses it to
+    # recognise frames that belong to submitted code.
+    return f"/job/{name}.py"
+
+
+def _load_module(name: str, source: str, safe_builtins: dict[str, Any]) -> types.ModuleType:
+    filename = _filename(name)
+    tree = _runtime_ast_check(source, filename)
     module = types.ModuleType(name)
     module.__dict__["__builtins__"] = safe_builtins
     module.__dict__["__file__"] = filename
@@ -82,11 +89,10 @@ def _load_module(name: str, workdir: Path, safe_builtins: dict[str, Any]) -> typ
     return module
 
 
-def run_job(workdir: Path) -> dict[str, Any]:
+def run_job(job: dict[str, Any]) -> dict[str, Any]:
     global _SOURCES
-    with _ORIGINAL_OPEN(workdir / "input.json", encoding="utf-8") as file:
-        job = json.load(file)
-    _SOURCES = frozenset(str(workdir / name) for name in ("skill.py", "test_skill.py"))
+    files = job["files"]
+    _SOURCES = frozenset(_filename(name) for name in ("skill", "test_skill"))
     allowed = frozenset(job.get("allowed_imports", []))
     # Preload and warm lazy imports before the I/O guard is installed.
     for name in allowed:
@@ -155,13 +161,13 @@ def run_job(workdir: Path) -> dict[str, Any]:
               "tests": {"total": 0, "failed": 0, "failures": []}, "error": None, "duration_ms": 0}
     try:
         with contextlib.redirect_stdout(DiscardOutput()), contextlib.redirect_stderr(DiscardOutput()):
-            skill = _load_module("skill", workdir, safe)
+            skill = _load_module("skill", files["skill.py"], safe)
             if job["mode"] == "run":
                 answer["result"] = skill.run(job.get("inputs", []), job.get("params", {}))
                 if not isinstance(answer["result"], list):
                     raise TypeError("Výstup dovednosti musí být seznam.")
             else:
-                tests = _load_module("test_skill", workdir, safe)
+                tests = _load_module("test_skill", files["test_skill.py"], safe)
                 for name, function in list(tests.__dict__.items()):
                     if (not name.startswith("test_") or not isinstance(function, types.FunctionType)
                             or function.__module__ != "test_skill"):
@@ -183,16 +189,56 @@ def run_job(workdir: Path) -> dict[str, Any]:
     return answer
 
 
+def apply_limits(cpu_seconds: int, isolated: bool) -> None:
+    """Lower resource limits before any untrusted byte is parsed or executed."""
+    limits = [(resource.RLIMIT_CPU, cpu_seconds), (resource.RLIMIT_AS, MEMORY_BYTES),
+              (resource.RLIMIT_FSIZE, 0), (resource.RLIMIT_NOFILE, 64), (resource.RLIMIT_CORE, 0)]
+    if isolated:
+        # RLIMIT_NPROC counts per user, so it is only meaningful when the job
+        # owns a private UID; otherwise it would count the supervisor too.
+        limits.append((resource.RLIMIT_NPROC, 16))
+    for kind, value in limits:
+        resource.setrlimit(kind, (value, value))
+
+
+def _read_job(limit: int = MAX_INPUT_BYTES) -> Any:
+    chunks, size = [], 0
+    while True:
+        chunk = os.read(0, 65536)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > limit:
+            raise ValueError("The job exceeds the input limit.")
+        chunks.append(chunk)
+    os.close(0)
+    return json.loads(b"".join(chunks))
+
+
 def main() -> None:
+    apply_limits(int(sys.argv[1]), sys.argv[2] == "1")
     # CPython may add LC_CTYPE when it starts; no secret-bearing inherited env
     # survives. The executed skill sees exactly the explicitly supplied PATH.
     path = os.environ.get("PATH", os.defpath)
     os.environ.clear()
     os.environ["PATH"] = path
-    workdir = Path(sys.argv[1]).resolve()
-    answer = run_job(workdir)
-    with _ORIGINAL_OPEN(workdir / "result.json", "w", encoding="utf-8") as file:
-        json.dump(answer, file, ensure_ascii=False, allow_nan=False)
+    # Keep a private copy of the result pipe, then point stdout and stderr at
+    # /dev/null so nothing the skill prints can corrupt the result envelope.
+    result_fd = os.dup(1)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        answer = run_job(_read_job())
+    except (ValueError, KeyError, TypeError, RecursionError, MemoryError):
+        answer = {"status": "error", "result": None, "tests": {"total": 0, "failed": 0, "failures": []},
+                  "error": "Invalid job envelope.", "duration_ms": 0}
+    payload = json.dumps(answer, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    view = memoryview(payload)
+    while view:
+        view = view[os.write(result_fd, view):]
+    os.close(result_fd)
 
 
 if __name__ == "__main__":

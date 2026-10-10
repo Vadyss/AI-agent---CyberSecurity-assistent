@@ -7,11 +7,10 @@ import json
 import math
 import os
 from pathlib import Path
-import resource
+import selectors
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from typing import Any
@@ -21,7 +20,6 @@ from fastapi import FastAPI, Request
 MAX_BODY_BYTES = 8_000_000
 MAX_INPUT_BYTES = 5_000_000
 MAX_OUTPUT_BYTES = 10_000_000
-MEMORY_BYTES = 256 * 1024 * 1024
 ALLOWED_MODULES = frozenset({
     "re", "datetime", "collections", "itertools", "functools", "math",
     "statistics", "ipaddress", "json", "typing", "dataclasses", "bisect",
@@ -74,12 +72,66 @@ def validate_job(job: Any) -> str | None:
     return None
 
 
-def _limits(timeout_s: float) -> None:
-    cpu = math.ceil(timeout_s) + 1
-    for kind, value in ((resource.RLIMIT_CPU, cpu), (resource.RLIMIT_AS, MEMORY_BYTES),
-                        (resource.RLIMIT_FSIZE, MAX_OUTPUT_BYTES), (resource.RLIMIT_NOFILE, 64),
-                        (resource.RLIMIT_CORE, 0)):
-        resource.setrlimit(kind, (value, value))
+def _spawn(timeout_s: float) -> subprocess.Popen:
+    cpu_seconds = math.ceil(timeout_s) + 1
+    # No preexec_fn: it is unsafe in a threaded server. The runner lowers its
+    # own limits before it reads the untrusted job from stdin.
+    return subprocess.Popen(
+        [sys.executable, "-I", "-B", "-S", str(RUNNER_PATH), str(cpu_seconds), "0"],
+        cwd="/", env={"PATH": os.defpath}, start_new_session=True, close_fds=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+
+
+def _exchange(process: subprocess.Popen, payload: bytes, deadline: float) -> bytes | str:
+    """Feed the job and collect the bounded result without blocking on either pipe."""
+    output = bytearray()
+    view = memoryview(payload)
+    stdin, stdout = process.stdin, process.stdout
+    assert stdin is not None and stdout is not None
+    os.set_blocking(stdin.fileno(), False)
+    with selectors.DefaultSelector() as selector:
+        selector.register(stdin, selectors.EVENT_WRITE)
+        selector.register(stdout, selectors.EVENT_READ)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "timeout"
+            for key, _ in selector.select(remaining):
+                if key.fileobj is stdin:
+                    try:
+                        view = view[os.write(stdin.fileno(), view[:65536]):]
+                    except BlockingIOError:
+                        continue
+                    except BrokenPipeError:
+                        view = view[:0]
+                    if not view:
+                        selector.unregister(stdin)
+                        stdin.close()
+                else:
+                    chunk = os.read(stdout.fileno(), 65536)
+                    if not chunk:
+                        selector.unregister(stdout)
+                    else:
+                        output.extend(chunk)
+                        if len(output) > MAX_OUTPUT_BYTES + 4096:
+                            return "too_large"
+    try:
+        process.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        return "timeout"
+    return bytes(output)
+
+
+def _terminate(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):  # The group already exited.
+        pass
+    for pipe in (process.stdin, process.stdout):
+        if pipe is not None and not pipe.closed:
+            pipe.close()
+    process.wait()
 
 
 def execute_job_sync(job: Any) -> dict[str, Any]:
@@ -88,41 +140,27 @@ def execute_job_sync(job: Any) -> dict[str, Any]:
     validation_error = validate_job(job)
     if validation_error:
         return response("rejected", error=validation_error)
+    payload = json.dumps(job, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    timeout_s = float(job.get("timeout_s", 10))
     with _JOBS:
-        with tempfile.TemporaryDirectory(prefix="skill-job-", dir="/tmp") as dirname:
-            workdir = Path(dirname)
-            for filename, source in job["files"].items():
-                (workdir / filename).write_text(source, encoding="utf-8")
-            (workdir / "input.json").write_text(
-                json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-            timeout_s = float(job.get("timeout_s", 10))
-            process = subprocess.Popen(
-                [sys.executable, "-I", "-B", str(RUNNER_PATH), dirname], cwd=dirname,
-                env={"PATH": os.defpath}, start_new_session=True,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                preexec_fn=lambda: _limits(timeout_s),
-            )
-            try:
-                process.wait(timeout=timeout_s)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:  # Child exited while timeout fired.
-                    pass
-                process.wait()
-                return response("timeout", error="Překročen časový limit.",
-                                duration_ms=round((time.monotonic() - started) * 1000))
-            result_path = workdir / "result.json"
-            try:
-                if result_path.stat().st_size > MAX_OUTPUT_BYTES:
-                    raise ValueError("Výstup překračuje limit velikosti.")
-                answer = json.loads(result_path.read_text(encoding="utf-8"))
-                if not isinstance(answer, dict) or answer.get("status") not in {"ok", "error"}:
-                    raise ValueError("Neplatný výstup runneru.")
-            except (OSError, ValueError, RecursionError):
-                answer = response("error", error="Runner selhal nebo překročil limit zdrojů.")
-            answer["duration_ms"] = round((time.monotonic() - started) * 1000)
-            return answer
+        process = _spawn(timeout_s)
+        try:
+            output = _exchange(process, payload, time.monotonic() + timeout_s)
+        finally:
+            _terminate(process)
+    elapsed = round((time.monotonic() - started) * 1000)
+    if output == "timeout":
+        return response("timeout", error="Překročen časový limit.", duration_ms=elapsed)
+    try:
+        if output == "too_large":
+            raise ValueError("Výstup překračuje limit velikosti.")
+        answer = json.loads(output)
+        if not isinstance(answer, dict) or answer.get("status") not in {"ok", "error"}:
+            raise ValueError("Neplatný výstup runneru.")
+    except (ValueError, RecursionError):
+        answer = response("error", error="Runner selhal nebo překročil limit zdrojů.")
+    answer["duration_ms"] = elapsed
+    return answer
 
 
 async def execute_job(job: Any) -> dict[str, Any]:
