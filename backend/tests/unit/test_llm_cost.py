@@ -126,3 +126,13 @@ def test_legacy_stats_without_cost_remain_valid():
     value = RunStats(duration_ms=0, llm_calls=0, tokens_total=None,
                      skills_built=0, skills_reused=0)
     assert value.model_dump()["cost_usd"] is None
+
+
+def test_prompt_versions_are_content_addressed():
+    from orchestrator.llm import prompt_for, prompt_version, prompt_versions
+
+    versions = prompt_versions()
+    assert set(versions) == {"examiner", "forge", "planner", "rule_author", "summary"}
+    assert versions["planner"] == prompt_version("planner", prompt_for("planner"))
+    assert prompt_version("planner", prompt_for("planner") + " ") != versions["planner"]
+    assert prompt_version("planner", "") is None

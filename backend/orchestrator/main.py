@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import secrets
 from contextlib import asynccontextmanager
@@ -32,6 +33,8 @@ CONTRACT_VERSION = 1
 RUN_ID = re.compile(r"run_[a-z0-9]{4,32}")
 RESTART_REASON = "The backend restarted during this run."
 RETRY_BACKOFF_S = 30
+# Set at image build time (git commit); "dev" for local runs.
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
 
 
 API_DESCRIPTION = """Toolsmith builds, tests and proposes detection tools and rules; a human approves them.
@@ -494,6 +497,12 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         except IntegrityError:
             raise ApiError(409, "INTEGRITY_VIOLATION", "The tool's files no longer match their verified "
                                                        "digests; they are not shown.") from None
+
+    @router.get("/version")
+    async def version(principal: Principal = reader):
+        from orchestrator.llm import prompt_versions
+
+        return {"contract_version": CONTRACT_VERSION, "app_version": APP_VERSION, "prompts": prompt_versions()}
 
     @router.get("/usage")
     async def usage(principal: Principal = reader):

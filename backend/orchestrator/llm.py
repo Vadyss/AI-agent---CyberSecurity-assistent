@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -122,6 +123,20 @@ def count_cost(cost) -> None:
         counters.cost_usd = (money(getattr(counters, "cost_usd", None)) or money(0)) + cost
 
 
+def prompt_version(role: str, system: str) -> str | None:
+    """Content-addressed prompt version: any edit to a prompt yields a new version."""
+    if not system or not role.replace("_", "").isalpha():
+        return None
+    return f"{role.lower()}@{hashlib.sha256(system.encode('utf-8')).hexdigest()[:12]}"
+
+
+def prompt_versions() -> dict[str, str]:
+    """Versions of every shipped role prompt, for diagnostics and evaluation reports."""
+    folder = Path(__file__).resolve().parent / "prompts"
+    return {path.stem: prompt_version(path.stem, path.read_text(encoding="utf-8"))
+            for path in sorted(folder.glob("*.md"))}
+
+
 def _capture_usage(ledger, role, model, system, user, response, started, attempt, context=None, *, mock_text=None, pricing_allowed=True):
     data = None
     if response is not None and len(response.content) <= 2_000_000:
@@ -163,7 +178,8 @@ def _capture_usage(ledger, role, model, system, user, response, started, attempt
                   duration_ms=max(0, int((time.monotonic() - started) * 1000)),
                   timestamp=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                   retry=attempt > 1 or iteration > 1 or bool(context.get("repair")),
-                  status="success" if succeeded else "error", warning=warning)
+                  status="success" if succeeded else "error", warning=warning,
+                  prompt_version=prompt_version(role, system))
     if warning:
         logger.warning("LLM usage run_id=%s step=%s model=%s: %s", ledger.run_id, role, model, warning)
     return ledger.append(record)

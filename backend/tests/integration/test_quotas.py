@@ -91,3 +91,21 @@ def test_budget_guard_counts_down_with_known_costs():
             count_call(25)
     finally:
         TenantSpend.reset(token)
+
+
+def test_every_recorded_call_names_its_prompt_version(client):
+    import sqlalchemy as sa
+    from orchestrator.llm import prompt_versions
+    from storage.models import LlmUsage
+
+    run_id = client.post("/runs", json={"request": "detect ssh brute force"}).json()["run_id"]
+    finish(client, run_id)
+    events = client.get(f"/runs/{run_id}/events").json()["events"]
+    records = [e["data"]["record"] for e in events if e["type"] == "llm_usage" and e["data"]["kind"] == "call"]
+    assert {r["prompt_version"] for r in records} <= set(prompt_versions().values())
+
+    async def stored():
+        async with client.app.state.db.session() as session:
+            return set((await session.execute(sa.select(LlmUsage.prompt_version))).scalars())
+    assert call(client, stored) == {r["prompt_version"] for r in records}
+    assert client.get("/v1/version").json()["prompts"] == prompt_versions()

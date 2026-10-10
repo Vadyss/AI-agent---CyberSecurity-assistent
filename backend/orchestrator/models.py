@@ -215,6 +215,8 @@ class UsageRecordData(ContractModel):
     retry: bool
     status: Literal["success", "error"]
     warning: str | None
+    # role@<first 12 hex of SHA-256 of the system prompt>; changes with every prompt edit.
+    prompt_version: str | None = Field(default=None, pattern=r"^[a-z_]+@[0-9a-f]{12}$")
 
 
 class UsageStepData(ContractModel):
