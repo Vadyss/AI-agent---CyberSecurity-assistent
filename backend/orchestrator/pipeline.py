@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 from gatekeeper.types import ParseFailure, SandboxError
-from orchestrator.llm import LlmBudgetExceeded, LlmError, bind_run_counters, reset_run_counters
+from orchestrator.llm import LlmBudgetExceeded, LlmError, TenantBudgetExceeded, bind_run_counters, reset_run_counters
 from orchestrator.run_store import PendingApproval
 from orchestrator.sandbox_messages import present_sandbox_error
 from orchestrator.text import clip
@@ -21,6 +21,7 @@ REASONS = {
     "LLM_ERROR": "The language model request failed.",
     "SANDBOX_ERROR": "Sandbox is unavailable or failed.",
     "INTERNAL_ERROR": "Unexpected backend error.",
+    "QUOTA_EXCEEDED": "The tenant's quota is used up.",
 }
 
 
@@ -161,6 +162,8 @@ async def run_pipeline(run, gk, roles, emitter, settings, voice=None):
 
     try:
         await asyncio.wait_for(work(), timeout=settings.run_timeout_s)
+    except TenantBudgetExceeded:
+        await fail("QUOTA_EXCEEDED", "The tenant's monthly model budget is used up. An administrator can raise it.")
     except LlmBudgetExceeded:
         await fail("LLM_ERROR", "The language model call budget was exceeded.")
     except LlmError:

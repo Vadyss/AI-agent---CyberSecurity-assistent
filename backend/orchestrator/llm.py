@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timezone
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from decimal import Decimal
 from functools import lru_cache, wraps
 from html import escape
 from pathlib import Path
@@ -54,6 +55,19 @@ class LlmBudgetExceeded(LlmError):
     pass
 
 
+class TenantBudgetExceeded(LlmBudgetExceeded):
+    """The tenant's monthly model budget is used up."""
+
+
+@dataclass
+class TenantBudget:
+    remaining_usd: Decimal
+
+
+# Bound per run by the dispatcher; None outside runs (scripts, tests).
+TenantSpend: ContextVar[TenantBudget | None] = ContextVar("tenant_budget", default=None)
+
+
 @dataclass(frozen=True)
 class LlmResult:
     text: str
@@ -79,6 +93,9 @@ def reset_run_counters(token: RunBinding) -> None:
 
 
 def count_call(max_calls: int) -> None:
+    budget = TenantSpend.get()
+    if budget is not None and budget.remaining_usd <= 0:
+        raise TenantBudgetExceeded("The tenant's monthly model budget is used up.")
     counters = LlmBudget.get()
     if counters is not None:
         if counters.llm_calls >= max_calls:
@@ -93,6 +110,9 @@ def count_tokens(tokens: int | None) -> None:
 
 
 def count_cost(cost) -> None:
+    budget = TenantSpend.get()
+    if budget is not None and cost is not None:
+        budget.remaining_usd -= cost
     counters = LlmBudget.get()
     if counters is None:
         return

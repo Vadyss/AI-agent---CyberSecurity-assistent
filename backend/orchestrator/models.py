@@ -13,7 +13,7 @@ from orchestrator.text import clip
 Phase = Literal["intake", "plan", "forge", "rule", "validation", "approval", "done"]
 Status = Literal["queued", "running", "awaiting_approval", "approved", "rejected", "failed", "cancelled"]
 ReasonCode = Literal["REQUEST_REJECTED", "PLAN_INVALID", "FORGE_FAILED", "RULE_FAILED",
-                     "VALIDATION_FAILED", "LLM_ERROR", "SANDBOX_ERROR", "INTERNAL_ERROR"]
+                     "VALIDATION_FAILED", "LLM_ERROR", "SANDBOX_ERROR", "INTERNAL_ERROR", "QUOTA_EXCEEDED"]
 Name = str
 
 

@@ -172,8 +172,14 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.state.auth = Authenticator(identity, issuer=config.oidc_issuer, verifier=verifier, local=local)
         from storage.runs import RunRepository
 
+        from orchestrator.quotas import QuotaService
+        from storage.usage import UsageRepository
+
         app.state.run_repository = RunRepository(db)
+        app.state.usage_repository = UsageRepository(db)
         app.state.emitter.repository = app.state.run_repository
+        app.state.emitter.usage = app.state.usage_repository
+        app.state.quotas = QuotaService(config, identity, app.state.run_repository, app.state.usage_repository)
         app.state.interrupted = await recover_unfinished_runs(app.state.run_repository)
 
     app = FastAPI(title="Frankenstein", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -212,14 +218,19 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
 
     async def start_run(record):
         """Called by the dispatcher for a claimed run: start its pipeline as the run's creator."""
+        from orchestrator.llm import TenantBudget, TenantSpend
+
         run = app.state.store.adopt(record.id, record.request, record.tenant_id, record.created_by, record.attempt)
         tenant_gatekeeper = await app.state.gatekeepers.get(record.tenant_id)
         run_settings = replace(config, data_dir=app.state.gatekeepers.data_dir(record.tenant_id))
-        token = AUDIT_ACTOR.set(record.created_by)
+        remaining = await app.state.quotas.remaining_budget(record.tenant_id)
+        # The task copies this context: audit actor and the tenant's remaining model budget.
+        tokens = (AUDIT_ACTOR.set(record.created_by), TenantSpend.set(TenantBudget(remaining)))
         try:
             run.task = asyncio.create_task(execute(run, tenant_gatekeeper, run_settings))
         finally:
-            AUDIT_ACTOR.reset(token)
+            TenantSpend.reset(tokens[1])
+            AUDIT_ACTOR.reset(tokens[0])
         return run.task
 
     async def execute(run, tenant_gatekeeper, run_settings):
@@ -263,6 +274,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             raise ApiError(400, "INVALID_REQUEST", "The request must contain 1 to 2000 characters.")
         # A tenant-wide cap on new runs; each run can spend real model budget.
         app.state.run_limits.check(f"tenant:{principal.tenant_id}")
+        await app.state.quotas.check_can_start(principal.tenant_id)
         queued = await app.state.run_repository.count(principal.tenant_id, statuses=("queued",))
         if queued >= config.max_queued_runs_per_tenant:
             raise ApiError(429, "QUEUE_FULL", "Too many runs are waiting; try again when one has finished.")
@@ -355,6 +367,10 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         if not 1 <= len(reason) <= 500:
             raise ApiError(400, "INVALID_REQUEST", "The reason must contain 1 to 500 characters.")
         return await reject(run, reason, await app.state.gatekeepers.get(principal.tenant_id), app.state.emitter)
+
+    @router.get("/usage")
+    async def usage(principal: Principal = reader):
+        return await app.state.quotas.report(principal.tenant_id)
 
     @router.get("/skills")
     async def list_skills(principal: Principal = reader):
