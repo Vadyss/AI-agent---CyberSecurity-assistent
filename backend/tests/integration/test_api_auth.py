@@ -123,3 +123,22 @@ def test_api_keys_authenticate_with_their_role_and_stop_when_revoked(app_client,
     call(app_client, service.revoke_api_key, acme_id, analyst_key.id)
     response = app_client.get("/runs", headers={"X-API-Key": analyst_token})
     assert response.status_code == 401 and response.json()["error"]["code"] == "INVALID_API_KEY"
+
+
+def test_requests_and_new_runs_are_rate_limited(app_client, world):
+    from identity.ratelimit import RateLimiter
+    app_client.app.state.rate_limits = RateLimiter(60, burst=2)
+    assert app_client.get("/runs", headers=world["victor"]).status_code == 200
+    assert app_client.get("/runs", headers=world["victor"]).status_code == 200
+    limited = app_client.get("/runs", headers=world["victor"])
+    assert limited.status_code == 429 and limited.json()["error"]["code"] == "RATE_LIMITED"
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert app_client.get("/runs", headers=world["alice"]).status_code == 200  # Per actor.
+
+    app_client.app.state.rate_limits = RateLimiter(1000)
+    app_client.app.state.run_limits = RateLimiter(60, burst=1)
+    first = app_client.post("/runs", headers=world["alice"], json={"request": "detect ssh brute force"})
+    assert first.status_code == 202
+    second = app_client.post("/runs", headers=world["founder"], json={"request": "detect ssh brute force"})
+    assert second.status_code == 429  # Run creation is limited per tenant, not per person.
+    assert app_client.post("/runs", headers=world["mallory"], json={"request": "detect ssh brute force"}).status_code == 202

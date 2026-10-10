@@ -130,6 +130,10 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.state.emitter = EventEmitter(app.state.hub)
     app.state.gatekeepers = None
     app.state.auth = None
+    from identity.ratelimit import RateLimiter
+
+    app.state.rate_limits = RateLimiter(config.rate_limit_per_minute)
+    app.state.run_limits = RateLimiter(config.run_rate_limit_per_minute)
     if config.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins),
                            allow_methods=["GET", "POST"],
@@ -154,6 +158,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         text = body.request.strip()
         if not 1 <= len(text) <= 2000:
             raise ApiError(400, "INVALID_REQUEST", "The request must contain 1 to 2000 characters.")
+        # A tenant-wide cap on new runs; each run can spend real model budget.
+        app.state.run_limits.check(f"tenant:{principal.tenant_id}")
         tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
         run = await app.state.store.create(text, principal.tenant_id, principal.actor)
         pipeline = pipeline_runner

@@ -88,9 +88,10 @@ class Authenticator:
 
 
 def requires(permission: Permission):
-    """FastAPI dependency: authenticate, check the permission, tag the audit actor."""
+    """FastAPI dependency: authenticate, rate-limit, check the permission, tag the audit actor."""
     async def dependency(request: Request) -> Principal:
         principal = await request.app.state.auth.authenticate(request.headers)
+        request.app.state.rate_limits.check(principal.actor)
         principal.require(permission)
         request.state.principal = principal
         AUDIT_ACTOR.set(principal.actor)

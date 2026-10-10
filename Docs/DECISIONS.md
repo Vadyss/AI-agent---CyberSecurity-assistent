@@ -77,3 +77,9 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Audit:** Every audit record carries the actor (`user:<id>`, `api_key:<id>`, `local:local`), including approvals and sandbox executions.
 - **Local tenant:** With authentication disabled, everything belongs to a local tenant with a fixed ID, so its data survives restarts in development.
 - **Trade-off:** Principals are cached for up to 60 seconds after token verification, so a role change can take up to a minute to apply.
+
+## D-012 Rate limiting in process
+
+- **Decision:** Token buckets in the backend process: `RATE_LIMIT_PER_MINUTE` per actor (user or API key) for every authenticated request, and `RUN_RATE_LIMIT_PER_MINUTE` per tenant for new runs. Answers are `429 RATE_LIMITED` with `Retry-After`.
+- **Why:** The deployment target is one machine with one backend instance (your decision), so shared state such as Redis would add an operated component without benefit.
+- **Trade-off:** Limits reset on restart and would not be shared if the backend were scaled to several instances; Redis-backed buckets would be the next step then. Unauthenticated traffic is limited by oauth2-proxy and the reverse proxy in front, not by the backend.
