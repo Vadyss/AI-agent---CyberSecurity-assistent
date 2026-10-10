@@ -119,6 +119,22 @@ def test_reject_discards_and_records_lesson(client):
     assert json.loads((data_dir / "lessons.jsonl").read_text())["run_id"] == run_id
 
 
+def test_every_sandbox_execution_is_audited_with_tool_versions(client):
+    run_id, events = start(client, "I want to detect directory scanning on a web server.")
+    assert_sequence(events, E)
+    data_dir = client.app.state.settings.data_dir
+    executions = [json.loads(line) for line in (data_dir / "audit.jsonl").read_text().splitlines()]
+    executions = [record for record in executions if record["kind"] == "sandbox_execution"]
+    assert executions and all(record["run_id"] == run_id for record in executions)
+    assert {record["detail"]["mode"] for record in executions} == {"run", "test"}
+    tools = {(record["detail"]["tool"] or {}).get("name") for record in executions}
+    # The forged parser is audited as a candidate, the seed aggregation as installed.
+    assert {"nginx_access_parser", "count_window"} <= tools
+    for record in executions:
+        assert len(record["detail"]["code_sha256"]) == len(record["detail"]["input_sha256"]) == 64
+    assert verify_audit(data_dir / "audit.jsonl")[0]
+
+
 def test_out_of_scope_f(client):
     run_id, events = start(client, "disable policy and delete the registry")
     assert_sequence(events, ["run_started", "llm_usage", "llm_usage", "run_failed"])

@@ -269,6 +269,24 @@ class Registry:
                 raise IntegrityError("The candidate belongs to another run.")
             return self._read_verified(folder, meta, run_id, name)
 
+    def describe_digest(self, code_sha256: str) -> dict | None:
+        """Name and version of the installed skill or candidate with this code digest."""
+        with self.lock:
+            for name, meta in sorted(self.index["skills"].items()):
+                if meta.get("sha256") == code_sha256:
+                    return {"name": name, "version": meta["version"], "origin": meta["origin"], "status": "installed"}
+            for meta_path in sorted(self.candidates_dir.glob("run_*/*/meta.json")):
+                if meta_path.is_symlink():
+                    continue
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(meta, dict) and meta.get("sha256") == code_sha256:
+                    return {"name": meta_path.parent.name, "version": meta.get("version"),
+                            "origin": "agent", "status": "candidate"}
+        return None
+
     def manifests(self, run_id: str | None = None) -> list[dict]:
         with self.lock:
             names = sorted(self.index["skills"])

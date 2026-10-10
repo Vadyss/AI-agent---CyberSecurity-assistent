@@ -6,6 +6,7 @@ import asyncio
 from copy import deepcopy
 
 from .audit import AuditLog
+from .audited_sandbox import AuditedSandbox, audit_run
 from .datasets import DatasetStore
 from .evaluator import evaluate_recipe
 from .examiner_data import prepare_datasets
@@ -31,6 +32,8 @@ class Gatekeeper:
         self.audit = AuditLog(cfg.data_dir)
         self.registry = Registry(cfg.data_dir, self.audit)
         self.registry.initialize(cfg.seed_skills_dir)
+        # ``sandbox`` stays the raw client; every execution goes through ``executor``.
+        self.executor = AuditedSandbox(sandbox, self.audit, self.registry.describe_digest)
         self._lessons = Lessons(cfg.data_dir)
         self._plans = {}
         self._checked = {}
@@ -126,8 +129,9 @@ class Gatekeeper:
             if not isinstance(generated, dict) or set(generated) != {"code"} or not isinstance(generated["code"], str):
                 raise ValueError(reason)
             baseline = {name: self.datasets.load("ssh", name) for name in ("tuning", "validation")}
-            prepared = await prepare_datasets(run_id, custom["slug"], generated["code"], baseline,
-                                             self.sandbox, self.policy, lambda name: self.registry.read_skill(None, name))
+            with audit_run(run_id):
+                prepared = await prepare_datasets(run_id, custom["slug"], generated["code"], baseline,
+                                                 self.executor, self.policy, lambda name: self.registry.read_skill(None, name))
             digests = self.registry.save_examiner_data(run_id, prepared)
             self._custom_data[run_id] = prepared
             self._custom_attacks[run_id] = {"slug": custom["slug"], "description": description}
@@ -168,9 +172,10 @@ class Gatekeeper:
             self.audit.append("skill_rejected", run_id, {"skill": spec.name,
                               "attempt": self._skill_attempts[key], "violations": [v.model_dump() for v in violations]})
             return SkillVerdict(kind="policy_rejected", violations=violations)
-        result = await self.sandbox.test(draft["code"], draft["tests"],
-                                         allowed_imports=list(self.policy.skills.allowed_imports),
-                                         timeout_s=self.policy.sandbox.test_timeout_s)
+        with audit_run(run_id):
+            result = await self.executor.test(draft["code"], draft["tests"],
+                                              allowed_imports=list(self.policy.skills.allowed_imports),
+                                              timeout_s=self.policy.sandbox.test_timeout_s)
         report = result["tests"]
         total = report["total"]
         failed = report["failed"]
@@ -183,8 +188,9 @@ class Gatekeeper:
             total += 1
             failed += 1
             failures.append({"name": "test_count", "error": "The skill contains too few tests."})
-        hidden_total, hidden_failures = await run_hidden_tests(manifest, draft["code"], self.sandbox, self.policy,
-             parser_lines=self.datasets.parser_lines(plan.log_source) if spec.role == "parser" else None)
+        with audit_run(run_id):
+            hidden_total, hidden_failures = await run_hidden_tests(manifest, draft["code"], self.executor, self.policy,
+                 parser_lines=self.datasets.parser_lines(plan.log_source) if spec.role == "parser" else None)
         total += hidden_total
         failed += len(hidden_failures)
         failures.extend(hidden_failures)
@@ -227,8 +233,9 @@ class Gatekeeper:
         plan = self._plans[run_id]
         data = self._dataset(run_id, plan.log_source, "tuning")
         digests = self._skill_digests(run_id, recipe)
-        result = await evaluate_recipe(recipe, data.lines, data.labels, lambda name: self.registry.read_skill(run_id, name),
-                                       self.sandbox, self.policy, feedback=True, audit=self.audit, run_id=run_id)
+        with audit_run(run_id):
+            result = await evaluate_recipe(recipe, data.lines, data.labels, lambda name: self.registry.read_skill(run_id, name),
+                                           self.executor, self.policy, feedback=True, audit=self.audit, run_id=run_id)
         if digests != self._skill_digests(run_id, recipe):
             raise IntegrityError("The skill changed during evaluation.")
         self._tuning[run_id] = {"recipe_sha256": recipe_sha256(recipe), "metrics": result.metrics,
@@ -250,8 +257,9 @@ class Gatekeeper:
         self._validation_started.add(run_id)
         plan = self._plans[run_id]
         data = self._dataset(run_id, plan.log_source, "validation")
-        result = await evaluate_recipe(recipe, data.lines, data.labels, lambda name: self.registry.read_skill(run_id, name),
-                                       self.sandbox, self.policy, audit=self.audit, run_id=run_id)
+        with audit_run(run_id):
+            result = await evaluate_recipe(recipe, data.lines, data.labels, lambda name: self.registry.read_skill(run_id, name),
+                                           self.executor, self.policy, audit=self.audit, run_id=run_id)
         if digests != self._skill_digests(run_id, recipe):
             raise IntegrityError("The skill changed during validation.")
         self._validated[run_id] = {"recipe_sha256": recipe_sha256(recipe), "attack_type": plan.attack_type,
