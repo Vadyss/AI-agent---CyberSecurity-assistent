@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from orchestrator.models import DATA_MODELS, EventEnvelope
 from orchestrator.run_store import FINISHED_STATUSES, PHASES, RunState, now_iso
 from orchestrator.text import clip, safe_name
+from orchestrator.tracing import add_event
 from orchestrator.ws import WebSocketHub
 
 EVENT_TYPES = frozenset(DATA_MODELS)
@@ -157,4 +158,5 @@ class EventEmitter:
                 elif event_type == "llm_usage" and clean.get("kind") == "call":
                     self.metrics.llm_call(clean["record"])
             self.hub.broadcast(event, run.tenant_id)
+            add_event(event_type, {"toolsmith.seq": event["seq"], "toolsmith.phase": phase})
             return event

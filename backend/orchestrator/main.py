@@ -23,6 +23,7 @@ from orchestrator.api_models import (ERROR_RESPONSES, CandidatesResponse, Decisi
                                      RunStatusResponse, SkillsResponse, ToolReview)
 from orchestrator.metrics import Metrics
 from orchestrator.observability import LOG_FIELDS, RequestContext, bind_log, configure_logging
+from orchestrator.tracing import setup_tracing, shutdown_tracing, tracer_for
 from orchestrator.auth import Authenticator, requires
 from orchestrator.config import Settings
 from orchestrator.decisions import approve, reject
@@ -157,7 +158,7 @@ async def recover_unfinished_runs(repository) -> list:
 
 
 def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipeline_runner=None, voice=None,
-               oidc_transport=None) -> FastAPI:
+               oidc_transport=None, tracer_provider=None) -> FastAPI:
     config = (settings or Settings.from_env()).validate()
 
     @asynccontextmanager
@@ -233,6 +234,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                         logging.getLogger(__name__).error("Failed to close a backend resource (%s).", type(exc).__name__)
             if app.state.oidc_http is not None:
                 await app.state.oidc_http.aclose()
+            shutdown_tracing(app.state.tracer_provider)
             if app.state.db is not None:
                 await app.state.db.close()
 
@@ -367,8 +369,12 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             from orchestrator.pipeline import run_pipeline
 
             pipeline = run_pipeline
+        attributes = {"toolsmith.run_id": run.run_id, "toolsmith.tenant_id": str(run.tenant_id),
+                      "toolsmith.attempt": run.attempt}
         try:
-            await pipeline(run, tenant_gatekeeper, app.state.roles, app.state.emitter, run_settings, app.state.voice)
+            with app.state.tracer.start_as_current_span("toolsmith.run", attributes=attributes) as span:
+                await pipeline(run, tenant_gatekeeper, app.state.roles, app.state.emitter, run_settings, app.state.voice)
+                span.set_attribute("toolsmith.status", run.status)
         finally:
             if run.cancel_requested and run.status == "running":
                 # Whatever the pipeline did, a cancelled run must end in a terminal state.
@@ -595,6 +601,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.add_middleware(ApiPrefixes)
     # Outermost: every request, including rewritten ones, gets an ID and an access line.
     app.add_middleware(RequestContext, metrics=app.state.metrics)
+    app.state.tracer_provider = setup_tracing(app, config, APP_VERSION, provider=tracer_provider)
+    app.state.tracer = tracer_for(app.state.tracer_provider)
 
     app.openapi = lambda: describe_api(app)
     return app
