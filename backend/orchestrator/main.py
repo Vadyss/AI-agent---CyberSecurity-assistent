@@ -12,14 +12,17 @@ from dataclasses import replace
 
 from fastapi import APIRouter, Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from gatekeeper.api import AUDIT_ACTOR
+from identity.oidc import TokenError
 from identity.principal import IdentityError, Permission, Principal
 from orchestrator.api_errors import ApiError, register_handlers
 from orchestrator.api_models import (ERROR_RESPONSES, CandidatesResponse, DecisionResponse, EventsResponse,
-                                     HealthResponse, MeResponse, RunCreated, RunsResponse, RunStatusResponse,
-                                     SkillsResponse, ToolReview)
+                                     HealthResponse, MeResponse, ReadinessResponse, RunCreated, RunsResponse,
+                                     RunStatusResponse, SkillsResponse, ToolReview)
+from orchestrator.metrics import Metrics
+from orchestrator.observability import LOG_FIELDS, RequestContext, bind_log, configure_logging
 from orchestrator.auth import Authenticator, requires
 from orchestrator.config import Settings
 from orchestrator.decisions import approve, reject
@@ -44,6 +47,9 @@ ID token (`Authorization: Bearer`). Programmatic clients send `X-API-Key: tsk_..
 Members of several tenants choose one with `X-Toolsmith-Tenant`. Errors always have the shape
 `{"error": {"code": "...", "message": "..."}}`. Live events: WebSocket `/v1/ws` (same authentication;
 `?tenant=` selects the tenant)."""
+
+
+PROBES = {"/health", "/ready"}
 
 
 class ApiPrefixes:
@@ -71,8 +77,8 @@ class ApiPrefixes:
         for prefix in self.LEGACY:
             if path.startswith(prefix + "/"):
                 rest = path[len(prefix):]
-                return "/v1" + rest, prefix, rest != "/health"
-        return "/v1" + path, "", path != "/health"
+                return "/v1" + rest, prefix, rest not in PROBES
+        return "/v1" + path, "", path not in PROBES
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"}:
@@ -80,7 +86,8 @@ class ApiPrefixes:
         path, prefix, deprecated = self.route(scope["path"])
         raw = scope.get("raw_path") or scope["path"].encode()
         raw = b"/v1" + raw[len(prefix):] if raw.startswith(prefix.encode()) and path != scope["path"] else raw
-        scope = {**scope, "path": path, "raw_path": raw}
+        # In place, so outer middleware sees the matched route for logs and metrics.
+        scope["path"], scope["raw_path"] = path, raw
         if not deprecated or scope["type"] != "http":
             return await self.app(scope, receive, send)
 
@@ -109,7 +116,7 @@ def describe_api(app: FastAPI) -> dict:
     }
     schema["security"] = [{"oidcIdToken": []}, {"apiKey": []}]
     for path, operations in schema["paths"].items():
-        if path.endswith("/health"):
+        if path.endswith(("/health", "/ready")):
             for operation in operations.values():
                 operation["security"] = []
     app.openapi_schema = schema
@@ -161,7 +168,9 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.state.examiner = None
         app.state.db = None
         app.state.oidc_http = None
-        logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+        configure_logging(config.log_level, config.environment, config.log_format)
+        if config.metrics_port and config.environment != "test":
+            app.state.metrics.serve(config.metrics_port)
         try:
             await open_identity(app)
             if sandbox_client is None:
@@ -174,7 +183,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                 return await app.state.examiner.generate(description, log_format)
 
             app.state.gatekeepers = GatekeeperPool(config, sandbox_client, examine if config.examiner_enabled else None,
-                                                   fixed=gatekeeper)
+                                                   fixed=gatekeeper, observer=app.state.metrics.sandbox_execution)
+            app.state.sandbox_client = sandbox_client
             # Development and tests: expose the local tenant's gatekeeper for diagnostics.
             local = app.state.auth.local
             app.state.gatekeeper = await app.state.gatekeepers.get(local.tenant_id) if local else gatekeeper
@@ -204,7 +214,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             from orchestrator.dispatcher import RunDispatcher
 
             app.state.dispatcher = RunDispatcher(app.state.run_repository, start_run,
-                                                 concurrency=config.worker_concurrency)
+                                                 concurrency=config.worker_concurrency, metrics=app.state.metrics)
             for record in app.state.interrupted:
                 if record.attempt < config.run_max_attempts:
                     await schedule_retry(record.id, record.tenant_id, record.created_by, record.request,
@@ -279,6 +289,9 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.state.emitter = EventEmitter(app.state.hub)
     app.state.gatekeepers = None
     app.state.auth = None
+    app.state.metrics = Metrics()
+    app.state.emitter.metrics = app.state.metrics
+    app.state.sandbox_client = None
     app.state.run_repository = None
     app.state.dispatcher = None
     app.state.interrupted = []
@@ -299,6 +312,30 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     async def health():
         return {"status": "ok", "contract_version": CONTRACT_VERSION}
 
+    @router.get("/ready", response_model=ReadinessResponse,
+                responses={503: {"model": ReadinessResponse, "description": "A dependency is not ready."}})
+    async def ready():
+        """Readiness for load balancers and monitoring: database, schema, sandbox, identity provider."""
+        checks = {"database": False, "schema": False, "sandbox": False, "identity_provider": True}
+        if app.state.db is not None:
+            checks["database"] = await app.state.db.ping()
+            checks["schema"] = checks["database"] and await app.state.db.schema_is_current()
+        if app.state.sandbox_client is not None:
+            try:
+                checks["sandbox"] = await asyncio.wait_for(app.state.sandbox_client.health(), 3)
+            except Exception:
+                checks["sandbox"] = False
+        verifier = app.state.auth.verifier if app.state.auth is not None else None
+        if verifier is not None:
+            try:
+                await asyncio.wait_for(verifier.jwks.key_for(None), 5)
+            except TokenError:
+                pass  # Keys load fine; there is just no key without an ID.
+            except Exception:
+                checks["identity_provider"] = False
+        body = {"status": "ready" if all(checks.values()) else "not_ready", "checks": checks}
+        return JSONResponse(body, status_code=200 if all(checks.values()) else 503)
+
     @router.get("/me", response_model=MeResponse)
     async def me(principal: Principal = reader):
         return {"kind": principal.kind, "id": principal.id, "email": principal.email, "role": principal.role,
@@ -313,11 +350,13 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         tenant_gatekeeper = await app.state.gatekeepers.get(record.tenant_id)
         run_settings = replace(config, data_dir=app.state.gatekeepers.data_dir(record.tenant_id))
         remaining = await app.state.quotas.remaining_budget(record.tenant_id)
-        # The task copies this context: audit actor and the tenant's remaining model budget.
-        tokens = (AUDIT_ACTOR.set(record.created_by), TenantSpend.set(TenantBudget(remaining)))
+        # The task copies this context: audit actor, log fields and the tenant's remaining model budget.
+        tokens = (AUDIT_ACTOR.set(record.created_by), TenantSpend.set(TenantBudget(remaining)),
+                  bind_log(tenant_id=record.tenant_id, run_id=record.id))
         try:
             run.task = asyncio.create_task(execute(run, tenant_gatekeeper, run_settings))
         finally:
+            LOG_FIELDS.reset(tokens[2])
             TenantSpend.reset(tokens[1])
             AUDIT_ACTOR.reset(tokens[0])
         return run.task
@@ -554,6 +593,8 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     # (API-key clients) and the deprecated unversioned paths onto /v1.
     app.include_router(router, prefix="/v1")
     app.add_middleware(ApiPrefixes)
+    # Outermost: every request, including rewritten ones, gets an ID and an access line.
+    app.add_middleware(RequestContext, metrics=app.state.metrics)
 
     app.openapi = lambda: describe_api(app)
     return app

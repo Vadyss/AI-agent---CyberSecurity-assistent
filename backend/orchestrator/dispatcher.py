@@ -9,8 +9,9 @@ logger = logging.getLogger(__name__)
 
 
 class RunDispatcher:
-    def __init__(self, repository, start, *, concurrency: int, poll_s: float = 1.0) -> None:
+    def __init__(self, repository, start, *, concurrency: int, poll_s: float = 1.0, metrics=None) -> None:
         self.repository = repository
+        self.metrics = metrics
         self.start = start            # async (RunRecord) -> asyncio.Task
         self.concurrency = concurrency
         self.poll_s = poll_s
@@ -40,10 +41,15 @@ class RunDispatcher:
                     continue
                 task.add_done_callback(lambda _task, run_id=record.id: self._finished(run_id))
                 started.append(record.id)
+            if self.metrics is not None:
+                self.metrics.active_runs.set(len(self.active))
+                self.metrics.queue_depth.set(await self.repository.count_queued())
         return started
 
     def _finished(self, run_id: str) -> None:
         self.active.discard(run_id)
+        if self.metrics is not None:
+            self.metrics.active_runs.set(len(self.active))
         self.wake()
 
     async def _loop(self) -> None:

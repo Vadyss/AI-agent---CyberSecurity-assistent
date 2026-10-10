@@ -337,6 +337,15 @@ async def execute(request: Request) -> dict[str, Any]:
     return await execute_job(job)
 
 
+class JsonFormatter(logging.Formatter):
+    """One JSON object per line, like the backend; submitted code never reaches these logs."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(record.created))
+                           + f".{int(record.msecs):03d}Z", "level": record.levelname.lower(),
+                           "logger": record.name, "message": record.getMessage(), "service": "sandbox"})
+
+
 def prepare_socket_dir(socket_path: str, client_gid: int) -> None:
     """Only the backend's group may reach the socket; job UIDs cannot even traverse."""
     folder = Path(socket_path).parent
@@ -371,16 +380,20 @@ def main() -> None:
     socket_path = os.environ.get("SANDBOX_SOCKET") or None
     if sys.argv[1:] == ["--health"]:
         raise SystemExit(0 if healthy(socket_path) else 1)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    for name in ("uvicorn", "uvicorn.error"):
+        logging.getLogger(name).handlers, logging.getLogger(name).propagate = [], True
     preflight()
     import uvicorn
 
     if socket_path:
         prepare_socket_dir(socket_path, int(os.environ.get("SANDBOX_CLIENT_GID", "10001")))
-        uvicorn.run(app, uds=socket_path, access_log=False)
+        uvicorn.run(app, uds=socket_path, access_log=False, log_config=None)
     else:
         uvicorn.run(app, host=os.environ.get("SANDBOX_HOST", "0.0.0.0"),
-                    port=int(os.environ.get("SANDBOX_PORT", "8000")), access_log=False)
+                    port=int(os.environ.get("SANDBOX_PORT", "8000")), access_log=False, log_config=None)
 
 
 if __name__ == "__main__":

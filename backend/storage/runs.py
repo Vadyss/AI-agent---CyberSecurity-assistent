@@ -142,6 +142,10 @@ class RunRepository:
         async with self.db.session() as session:
             return (await session.execute(query)).scalar_one()
 
+    async def count_queued(self) -> int:
+        async with self.db.session() as session:
+            return (await session.execute(sa.select(sa.func.count()).select_from(Run).where(Run.status == "queued"))).scalar_one()
+
     async def unfinished(self) -> list[RunRecord]:
         """Runs a previous process left running or awaiting approval."""
         async with self.db.session() as session:

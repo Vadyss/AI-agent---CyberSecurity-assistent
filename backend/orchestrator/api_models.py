@@ -24,6 +24,11 @@ class HealthResponse(BaseModel):
     contract_version: int
 
 
+class ReadinessResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
+    checks: dict[str, bool]
+
+
 class TenantRef(BaseModel):
     id: str
     slug: str

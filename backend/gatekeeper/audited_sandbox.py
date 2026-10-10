@@ -35,10 +35,12 @@ def digest(value: Any) -> str:
 
 
 class AuditedSandbox:
-    def __init__(self, inner, audit, describe: Callable[[str], dict | None]) -> None:
+    def __init__(self, inner, audit, describe: Callable[[str], dict | None], observer=None) -> None:
         self.inner = inner
         self.audit = audit
         self.describe = describe
+        # Optional (mode, status, seconds) callback for metrics.
+        self.observer = observer
 
     async def health(self) -> bool:
         return await self.inner.health()
@@ -72,6 +74,8 @@ class AuditedSandbox:
 
     def _record(self, mode: str, code_sha256: str, inputs: dict, output: dict | None,
                 status: str | None, started: float) -> None:
+        if self.observer is not None:
+            self.observer(mode, status, time.monotonic() - started)
         self.audit.append("sandbox_execution", _RUN_ID.get(), {
             "mode": mode,
             "tool": self.describe(code_sha256),

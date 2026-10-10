@@ -26,4 +26,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
 
 # --factory: configuration is read and validated when the server starts, not at import.
-CMD ["uvicorn", "orchestrator.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--ws", "websockets", "--ws-ping-interval", "20", "--ws-ping-timeout", "20"]
+CMD ["uvicorn", "orchestrator.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--ws", "websockets", "--ws-ping-interval", "20", "--ws-ping-timeout", "20"]

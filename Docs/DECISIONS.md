@@ -112,3 +112,10 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Why:** The frontend team and API customers need a contract they can rely on and review in pull requests. A breaking change will get `/v2` while `/v1` stays available.
 - **Why one mount:** Including the router once per prefix made FastAPI rebuild every response model for every copy, which slowed start-up (the test suite went from 37 s to 54 s). Path rewriting costs nothing per route.
 - **Errors:** Every error has the shape `{"error": {"code", "message"}}` with a stable code. The common error responses are documented for every operation.
+
+## D-017 Logs, metrics and readiness
+
+- **Logs:** Backend and sandbox write one JSON object per line to stdout (`LOG_FORMAT=json`), so any log collector can ingest them. Each line carries the request ID (taken from a well-formed `X-Request-ID` or generated, and returned to the client) and, when known, the tenant, run and actor. Headers, query strings and bodies are never logged, and exceptions are logged by type only, because their messages can contain request data. The access log uses route templates (`/v1/runs/{run_id}/events`), not raw paths.
+- **Metrics:** Prometheus metrics (requests, latency, runs by outcome and duration, model calls, tokens and known cost, sandbox executions, queue depth) are served on `METRICS_PORT` (9100) inside the Docker network only. Labels never contain tenant IDs, run IDs or user data, which keeps cardinality bounded and tenant activity private.
+- **Health:** `/health` is a cheap liveness check for Docker. `/ready` checks the database, the schema revision, the sandbox and the identity provider's keys, and answers `503` with the failing component, for load balancers and monitoring.
+- **Trade-off:** No log shipping, dashboards or alert rules are deployed by default; an operator connects their own (see the operations guide).

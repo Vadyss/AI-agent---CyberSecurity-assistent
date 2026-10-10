@@ -95,5 +95,7 @@ def requires(permission: Permission):
         principal.require(permission)
         request.state.principal = principal
         AUDIT_ACTOR.set(principal.actor)
+        from orchestrator.observability import bind_log
+        bind_log(tenant_id=principal.tenant_id)
         return principal
     return dependency

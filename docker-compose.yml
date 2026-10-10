@@ -34,7 +34,9 @@ services:
       - --upstream-timeout=60s
     environment:
       OAUTH2_PROXY_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
-      OAUTH2_PROXY_COOKIE_SECRET: "${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET in .env (scripts/bootstrap-env.sh creates one)}"
+      # oauth2-proxy refuses to start without it (scripts/bootstrap-env.sh creates one).
+      # Not ":?" here: compose would then also refuse the demo overlay, which disables this service.
+      OAUTH2_PROXY_COOKIE_SECRET: "${OAUTH2_PROXY_COOKIE_SECRET:-}"
     read_only: true
     cap_drop:
       - ALL
@@ -145,6 +147,11 @@ services:
       WORKER_CONCURRENCY: "${WORKER_CONCURRENCY:-}"
       MAX_QUEUED_RUNS_PER_TENANT: "${MAX_QUEUED_RUNS_PER_TENANT:-}"
       RUN_MAX_ATTEMPTS: "${RUN_MAX_ATTEMPTS:-}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+      # Prometheus metrics on port 9100 inside the Docker network only (not published).
+      METRICS_PORT: "${METRICS_PORT:-9100}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      APP_VERSION: "${APP_VERSION:-dev}"
     volumes:
       - frankenstein-data:/data
       - sandbox-socket:/run/toolsmith

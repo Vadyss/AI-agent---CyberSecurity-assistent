@@ -9,10 +9,11 @@ from pathlib import Path
 
 
 class GatekeeperPool:
-    def __init__(self, settings, sandbox, examine=None, *, fixed=None) -> None:
+    def __init__(self, settings, sandbox, examine=None, *, fixed=None, observer=None) -> None:
         self.settings = settings
         self.sandbox = sandbox
         self.examine = examine
+        self.observer = observer
         # Tests may inject one gatekeeper; it then serves every tenant.
         self.fixed = fixed
         self._items: dict[str, object] = {}
@@ -33,6 +34,6 @@ class GatekeeperPool:
                 config = replace(self.settings.gatekeeper_config(), data_dir=self.data_dir(key))
                 sandbox = self.sandbox.for_tenant(key) if hasattr(self.sandbox, "for_tenant") else self.sandbox
                 # Registry start-up verifies and seeds files; keep it off the event loop.
-                gatekeeper = await asyncio.to_thread(Gatekeeper, config, sandbox, self.examine)
+                gatekeeper = await asyncio.to_thread(Gatekeeper, config, sandbox, self.examine, self.observer)
                 self._items[key] = gatekeeper
             return gatekeeper

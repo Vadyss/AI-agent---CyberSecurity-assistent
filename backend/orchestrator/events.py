@@ -81,11 +81,12 @@ def render_message(event_type: str, data: dict) -> str:
 
 
 class EventEmitter:
-    def __init__(self, hub: WebSocketHub, repository=None, usage=None):
+    def __init__(self, hub: WebSocketHub, repository=None, usage=None, metrics=None):
         self.hub = hub
         # Optional so unit tests can emit without a database.
         self.repository = repository
         self.usage = usage
+        self.metrics = metrics
 
     def assert_allowed(self, run: RunState, event_type: str, phase: str, data: dict) -> None:
         def fail(message):
@@ -149,5 +150,11 @@ class EventEmitter:
             run.status = status
             if event_type in TERMINAL_TYPES:
                 run.finished_at = event["timestamp"]
+            if self.metrics is not None:
+                if event_type in TERMINAL_TYPES:
+                    self.metrics.run_finished(status, clean.get("reason_code"),
+                                              time.monotonic() - run.stats.started_monotonic)
+                elif event_type == "llm_usage" and clean.get("kind") == "call":
+                    self.metrics.llm_call(clean["record"])
             self.hub.broadcast(event, run.tenant_id)
             return event

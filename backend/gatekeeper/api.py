@@ -28,7 +28,7 @@ __all__ = ["AUDIT_ACTOR", "Gatekeeper", "IntegrityError", "SandboxClient", "Usag
 
 
 class Gatekeeper:
-    def __init__(self, cfg: GatekeeperConfig, sandbox, examiner=None):
+    def __init__(self, cfg: GatekeeperConfig, sandbox, examiner=None, observer=None):
         self.policy = load_policy(cfg.policy_path)
         self.datasets = DatasetStore(cfg.datasets_dir, self.policy.datasets.min_instances_per_attack_type,
                                      self.policy.datasets.sample_lines)
@@ -37,7 +37,7 @@ class Gatekeeper:
         self.registry = Registry(cfg.data_dir, self.audit)
         self.registry.initialize(cfg.seed_skills_dir)
         # ``sandbox`` stays the raw client; every execution goes through ``executor``.
-        self.executor = AuditedSandbox(sandbox, self.audit, self.registry.describe_digest)
+        self.executor = AuditedSandbox(sandbox, self.audit, self.registry.describe_digest, observer)
         self._lessons = Lessons(cfg.data_dir)
         self._plans = {}
         self._checked = {}

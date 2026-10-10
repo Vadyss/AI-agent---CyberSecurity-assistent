@@ -12,3 +12,4 @@ psycopg[binary]==3.3.6
 alembic==1.20.0
 PyJWT[crypto]==2.15.1
 cryptography==50.0.2
+prometheus-client==0.26.0
