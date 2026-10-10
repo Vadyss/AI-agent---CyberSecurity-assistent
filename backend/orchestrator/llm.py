@@ -477,22 +477,34 @@ def prompt_for(role: str) -> str:
 
 
 async def json_chat(client: LlmClient, role: str, system: str, user: str, context: dict) -> dict | ParseFailure:
+    """One call, plus at most one repair when the output is not JSON or has the wrong shape."""
+    from .schemas import shape_problems
+
     result = await client.chat(role, system, user, context=context)
     if isinstance(result, ParseFailure):
         return result
     parsed = extract_json(result.text)
+    run_id = (LlmProviderState.get() or ProviderState()).run_id
     if isinstance(parsed, ParseFailure):
-        logger.info("LLM json_parse_failed run_id=%s role=%s stage=initial",
-                    (LlmProviderState.get() or ProviderState()).run_id, role)
-        repair = dict(context, repair=True)
-        repaired = await client.chat(role, system,
-                                     user + "\n" + untrusted("invalid_output", result.text[:20000])
-                                     + "\nReturn only valid JSON matching the required schema, with no additional text.", context=repair)
-        parsed = repaired if isinstance(repaired, ParseFailure) else extract_json(repaired.text)
-        if isinstance(parsed, ParseFailure):
-            logger.info("LLM json_parse_failed run_id=%s role=%s stage=repair",
-                        (LlmProviderState.get() or ProviderState()).run_id, role)
+        logger.info("LLM json_parse_failed run_id=%s role=%s stage=initial", run_id, role)
+        feedback = untrusted("invalid_output", result.text[:20000])
+    else:
+        problems = shape_problems(role, parsed)
+        if not problems:
+            return parsed
+        logger.info("LLM schema_failed run_id=%s role=%s stage=initial problems=%d", run_id, role, len(problems))
+        feedback = untrusted("schema_errors", problems)
+    repair = dict(context, repair=True)
+    repaired = await client.chat(role, system, user + "\n" + feedback
+                                 + "\nReturn only valid JSON matching the required schema, with no additional text.",
+                                 context=repair)
+    parsed = repaired if isinstance(repaired, ParseFailure) else extract_json(repaired.text)
+    if isinstance(parsed, ParseFailure):
+        logger.info("LLM json_parse_failed run_id=%s role=%s stage=repair", run_id, role)
         return parsed
+    if shape_problems(role, parsed):
+        logger.info("LLM schema_failed run_id=%s role=%s stage=repair", run_id, role)
+        return ParseFailure("The output does not match the required schema.")
     return parsed
 
 

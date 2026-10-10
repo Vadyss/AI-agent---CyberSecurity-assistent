@@ -25,7 +25,10 @@ class RecordingClient:
 
     async def chat(self, role, system, user, *, max_tokens=None, temperature=0.2, context=None):
         self.calls.append({"role": role, "system": system, "user": user})
-        return LlmResult('{"text": "ok"}', 0, "mock")
+        # A well-formed answer per role, so no repair call blurs the picture.
+        answers = {"planner": '{"intent": "out_of_scope"}', "forge": '{"manifest": {}, "code": "", "tests": ""}',
+                   "rule_author": '{"recipe": {}}', "summary": '{"text": "ok"}'}
+        return LlmResult(answers[role], 0, "mock")
 
     async def close(self):
         pass
