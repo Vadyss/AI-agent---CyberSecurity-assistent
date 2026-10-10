@@ -98,9 +98,10 @@ class RunStore:
                 if oldest.voice_task and not oldest.voice_task.done():
                     oldest.voice_task.cancel()
                 del self.runs[oldest.run_id]
-            run_id = "run_" + secrets.token_hex(4)
+            # 64 random bits: run IDs stay unique across the whole history in the database.
+            run_id = "run_" + secrets.token_hex(8)
             while run_id in self.runs:
-                run_id = "run_" + secrets.token_hex(4)
+                run_id = "run_" + secrets.token_hex(8)
             run = RunState(run_id, request, tenant_id, created_by)
             self.runs[run_id] = run
             return run
@@ -110,6 +111,11 @@ class RunStore:
         if not re.fullmatch(r"run_[a-z0-9]{4,32}", run_id) or run_id not in self.runs:
             raise ApiError(404, "RUN_NOT_FOUND", "Run not found.")
         return self.runs[run_id]
+
+    def find(self, run_id: str, tenant_id: uuid.UUID | None) -> RunState | None:
+        """The live run of this tenant, or None (finished runs may live only in the database)."""
+        run = self.runs.get(run_id)
+        return run if run is not None and run.tenant_id == tenant_id else None
 
     def get(self, run_id: str, tenant_id: uuid.UUID | None) -> RunState:
         run = self.lookup(run_id)

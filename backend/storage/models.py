@@ -132,6 +132,7 @@ class Run(Base):
     attempt: Mapped[int] = mapped_column(sa.Integer, default=1)
     retry_of: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    not_before: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
     reason_code: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
     last_seq: Mapped[int] = mapped_column(sa.Integer, default=0)
     llm_calls: Mapped[int] = mapped_column(sa.Integer, default=0)
@@ -147,6 +148,10 @@ class Run(Base):
                            "'failed', 'cancelled')", name="status"),
         sa.Index("ix_runs_tenant_created", "tenant_id", "created_at"),
         sa.Index("ix_runs_status_created", "status", "created_at"),
+        # The database itself guarantees at most one active run per tenant.
+        sa.Index("uq_runs_one_active_per_tenant", "tenant_id", unique=True,
+                 postgresql_where=sa.text("status IN ('running', 'awaiting_approval')"),
+                 sqlite_where=sa.text("status IN ('running', 'awaiting_approval')")),
     )
 
 

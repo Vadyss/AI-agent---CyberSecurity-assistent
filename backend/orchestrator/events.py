@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 
 from orchestrator.models import DATA_MODELS, EventEnvelope
 from orchestrator.run_store import FINISHED_STATUSES, PHASES, RunState, now_iso
@@ -77,8 +78,10 @@ def render_message(event_type: str, data: dict) -> str:
 
 
 class EventEmitter:
-    def __init__(self, hub: WebSocketHub):
+    def __init__(self, hub: WebSocketHub, repository=None):
         self.hub = hub
+        # Optional so unit tests can emit without a database.
+        self.repository = repository
 
     def assert_allowed(self, run: RunState, event_type: str, phase: str, data: dict) -> None:
         def fail(message):
@@ -120,14 +123,23 @@ class EventEmitter:
             event = EventEnvelope(type=event_type, run_id=run.run_id, seq=run.last_seq + 1,
                                   timestamp=now_iso(), phase=phase,
                                   message=render_message(event_type, clean), data=clean).model_dump(mode="json")
+            status = STATUS_BY_EVENT.get(event_type, run.status)
+            if self.repository is not None:
+                # Durable first: an event a client has seen always exists in the log.
+                finished = datetime.now(timezone.utc) if event_type in TERMINAL_TYPES else None
+                await self.repository.record_event(run.run_id, event, status=status, finished_at=finished)
+                if event_type in TERMINAL_TYPES or event_type == "summary":
+                    await self.repository.save_stats(run.run_id, llm_calls=run.stats.llm_calls,
+                                                     tokens_total=run.stats.tokens_total,
+                                                     cost_usd=None if run.stats.cost_unknown else run.stats.cost_usd,
+                                                     cost_unknown=run.stats.cost_unknown)
             run.events.append(event)
             run.last_seq += 1
             if event_type != "voice_ready":
                 run.phase_index = PHASES.index(phase)
             if event_type == "run_started":
                 run.stats.started_monotonic = time.monotonic()
-            if event_type in STATUS_BY_EVENT:
-                run.status = STATUS_BY_EVENT[event_type]
+            run.status = status
             if event_type in TERMINAL_TYPES:
                 run.finished_at = event["timestamp"]
             self.hub.broadcast(event, run.tenant_id)

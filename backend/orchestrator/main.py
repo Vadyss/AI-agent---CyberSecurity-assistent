@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
@@ -18,12 +19,33 @@ from orchestrator.auth import Authenticator, requires
 from orchestrator.config import Settings
 from orchestrator.decisions import approve, reject
 from orchestrator.events import EventEmitter
-from orchestrator.models import ApproveBody, CreateRunBody, RejectBody
+from orchestrator.models import ApproveBody, CreateRunBody, EventEnvelope, RejectBody, RunInfo
 from orchestrator.run_store import RunStore
 from orchestrator.tenancy import GatekeeperPool
 from orchestrator.ws import WebSocketHub
 
 CONTRACT_VERSION = 1
+RUN_ID = re.compile(r"run_[a-z0-9]{4,32}")
+RESTART_REASON = "The backend restarted during this run. Start it again."
+
+
+async def recover_unfinished_runs(repository) -> None:
+    """Close runs a previous process left open; their in-memory state is gone."""
+    from orchestrator.events import render_message
+    from orchestrator.run_store import now_iso
+
+    for record in await repository.unfinished():
+        events = await repository.events(record.id)
+        if not events:
+            await repository.set_status(record.id, "failed", reason_code="INTERNAL_ERROR", finished=True)
+            continue
+        data = {"reason_code": "INTERNAL_ERROR", "reason": RESTART_REASON}
+        event = EventEnvelope(type="run_failed", run_id=record.id, seq=record.last_seq + 1, timestamp=now_iso(),
+                              phase=events[-1]["phase"], message=render_message("run_failed", data),
+                              data=data).model_dump(mode="json")
+        from datetime import datetime, timezone
+        await repository.record_event(record.id, event, status="failed", finished_at=datetime.now(timezone.utc))
+        logging.getLogger(__name__).warning("Run %s was interrupted by a restart and marked failed.", record.id)
 
 
 def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipeline_runner=None, voice=None,
@@ -121,6 +143,11 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                 "AUTH_MODE=disabled: every request acts as the local admin. Development only.")
         app.state.identity = identity
         app.state.auth = Authenticator(identity, issuer=config.oidc_issuer, verifier=verifier, local=local)
+        from storage.runs import RunRepository
+
+        app.state.run_repository = RunRepository(db)
+        app.state.emitter.repository = app.state.run_repository
+        await recover_unfinished_runs(app.state.run_repository)
 
     app = FastAPI(title="Frankenstein", lifespan=lifespan, docs_url=None, redoc_url=None)
     register_handlers(app)
@@ -130,6 +157,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.state.emitter = EventEmitter(app.state.hub)
     app.state.gatekeepers = None
     app.state.auth = None
+    app.state.run_repository = None
     from identity.ratelimit import RateLimiter
 
     app.state.rate_limits = RateLimiter(config.rate_limit_per_minute)
@@ -162,6 +190,12 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.state.run_limits.check(f"tenant:{principal.tenant_id}")
         tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
         run = await app.state.store.create(text, principal.tenant_id, principal.actor)
+        try:
+            await app.state.run_repository.create(run_id=run.run_id, tenant_id=principal.tenant_id,
+                                                  created_by=principal.actor, request=text, status="running")
+        except Exception:
+            app.state.store.runs.pop(run.run_id, None)
+            raise
         pipeline = pipeline_runner
         if pipeline is None:
             from orchestrator.pipeline import run_pipeline
@@ -177,31 +211,55 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             AUDIT_ACTOR.reset(token)
         return {"run_id": run.run_id, "status": "running"}
 
+    async def stored_run(run_id: str, principal: Principal):
+        """The tenant's run from the database; another tenant's run is reported as missing."""
+        if not RUN_ID.fullmatch(run_id):
+            raise ApiError(404, "RUN_NOT_FOUND", "Run not found.")
+        record = await app.state.run_repository.get(run_id, principal.tenant_id)
+        if record is None:
+            raise ApiError(404, "RUN_NOT_FOUND", "Run not found.")
+        return record
+
+    async def live_run(run_id: str, principal: Principal):
+        """A run of this process that can still take a decision."""
+        run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
+        if run is None:
+            await stored_run(run_id, principal)
+            raise ApiError(409, "NOT_AWAITING_APPROVAL", "This run is not awaiting approval.")
+        return run
+
     @router.get("/runs")
-    async def list_runs(principal: Principal = reader):
-        return {"runs": app.state.store.list(principal.tenant_id)}
+    async def list_runs(limit: int = 50, principal: Principal = reader):
+        if not 1 <= limit <= 200:
+            raise ApiError(400, "INVALID_REQUEST", "limit must be between 1 and 200.")
+        records = await app.state.run_repository.list(principal.tenant_id, limit=limit)
+        return {"runs": [RunInfo.model_validate(r.info()).model_dump(mode="json") for r in records]}
 
     @router.get("/runs/{run_id:path}/events")
     async def get_events(run_id: str, after_seq: str = "0", principal: Principal = reader):
-        run = app.state.store.get(run_id, principal.tenant_id)
+        run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
+        if run is None:
+            await stored_run(run_id, principal)
         if not after_seq.isascii() or not after_seq.isdigit():
             raise ApiError(400, "INVALID_REQUEST", "Invalid after_seq parameter.")
         try:
             number = int(after_seq)
         except ValueError:
             raise ApiError(400, "INVALID_REQUEST", "Invalid after_seq parameter.") from None
+        if run is None:
+            return {"events": await app.state.run_repository.events(run_id, number)}
         async with run.lock:
             return {"events": [e for e in run.events if e["seq"] > number]}
 
     @router.post("/runs/{run_id:path}/approve")
     async def approve_run(run_id: str, body: ApproveBody | None = None, principal: Principal = decider):
-        run = app.state.store.get(run_id, principal.tenant_id)
+        run = await live_run(run_id, principal)
         return await approve(run, body.comment if body else None,
                              await app.state.gatekeepers.get(principal.tenant_id), app.state.emitter)
 
     @router.post("/runs/{run_id:path}/reject")
     async def reject_run(run_id: str, body: RejectBody, principal: Principal = decider):
-        run = app.state.store.get(run_id, principal.tenant_id)
+        run = await live_run(run_id, principal)
         reason = body.reason.strip()
         if not 1 <= len(reason) <= 500:
             raise ApiError(400, "INVALID_REQUEST", "The reason must contain 1 to 500 characters.")
@@ -214,7 +272,10 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
 
     @router.get("/runs/{run_id:path}/audio")
     async def get_audio(run_id: str, principal: Principal = reader):
-        run = app.state.store.get(run_id, principal.tenant_id)
+        run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
+        if run is None:
+            await stored_run(run_id, principal)
+            raise ApiError(404, "AUDIO_NOT_FOUND", "This run has no audio summary.")
         if run.audio is None:
             raise ApiError(404, "AUDIO_NOT_FOUND", "This run has no audio summary.")
         return Response(run.audio, media_type="audio/mpeg")

@@ -2,7 +2,8 @@
 """Async engine and sessions. PostgreSQL in every deployment; SQLite only in tests."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -29,6 +30,9 @@ class Database:
         else:
             raise ValueError("DATABASE_URL must use postgresql+psycopg:// (or sqlite in tests).")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        # SQLite (tests) shares one connection; interleaved transactions on it
+        # would see or roll back each other's work, so sessions take turns.
+        self._serial = asyncio.Lock() if self.is_sqlite else None
 
     @property
     def is_sqlite(self) -> bool:
@@ -36,14 +40,15 @@ class Database:
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
-        """A unit of work: commits on success, rolls back on any error."""
-        async with self.sessions() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
+        """A unit of work: commits on success, rolls back on any error. Never nest sessions."""
+        async with self._serial or nullcontext():
+            async with self.sessions() as session:
+                try:
+                    yield session
+                    await session.commit()
+                except BaseException:
+                    await session.rollback()
+                    raise
 
     async def create_schema(self) -> None:
         """Tests and ephemeral development only; deployments run Alembic migrations."""

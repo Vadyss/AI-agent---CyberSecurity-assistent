@@ -11,7 +11,7 @@ from gatekeeper.types import Metrics, SkillInfo, Thresholds, Violation
 from orchestrator.text import clip
 
 Phase = Literal["intake", "plan", "forge", "rule", "validation", "approval", "done"]
-Status = Literal["running", "awaiting_approval", "approved", "rejected", "failed"]
+Status = Literal["queued", "running", "awaiting_approval", "approved", "rejected", "failed", "cancelled"]
 ReasonCode = Literal["REQUEST_REJECTED", "PLAN_INVALID", "FORGE_FAILED", "RULE_FAILED",
                      "VALIDATION_FAILED", "LLM_ERROR", "SANDBOX_ERROR", "INTERNAL_ERROR"]
 Name = str
@@ -41,6 +41,10 @@ class RunInfo(ContractModel):
     created_at: str
     finished_at: str | None
     last_seq: int = Field(ge=0)
+    # Contract v1 additions (optional for older clients).
+    attempt: int = Field(default=1, ge=1)
+    retry_of: str | None = None
+    created_by: str | None = None
 
 
 class RunStats(ContractModel):
