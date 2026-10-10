@@ -44,8 +44,9 @@ def test_readme_local_document_links_exist():
 
 def test_backend_image_contains_every_runtime_package():
     dockerfile = (ROOT / "backend" / "Dockerfile").read_text()
+    # tests and evals are development tooling; evals needs the repository's sandbox package.
     packages = sorted(p.name for p in (ROOT / "backend").iterdir()
-                      if (p / "__init__.py").is_file() and p.name != "tests")
+                      if (p / "__init__.py").is_file() and p.name not in {"tests", "evals"})
     assert packages, "No backend packages found."
     for package in packages:
         assert f"COPY {package}/ ./{package}/" in dockerfile, package
