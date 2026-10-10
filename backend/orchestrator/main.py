@@ -16,6 +16,9 @@ from fastapi.responses import Response
 from gatekeeper.api import AUDIT_ACTOR
 from identity.principal import IdentityError, Permission, Principal
 from orchestrator.api_errors import ApiError, register_handlers
+from orchestrator.api_models import (ERROR_RESPONSES, CandidatesResponse, DecisionResponse, EventsResponse,
+                                     HealthResponse, MeResponse, RunCreated, RunsResponse, RunStatusResponse,
+                                     SkillsResponse, ToolReview)
 from orchestrator.auth import Authenticator, requires
 from orchestrator.config import Settings
 from orchestrator.decisions import approve, reject
@@ -29,6 +32,85 @@ CONTRACT_VERSION = 1
 RUN_ID = re.compile(r"run_[a-z0-9]{4,32}")
 RESTART_REASON = "The backend restarted during this run."
 RETRY_BACKOFF_S = 30
+
+
+API_DESCRIPTION = """Toolsmith builds, tests and proposes detection tools and rules; a human approves them.
+
+Authentication: browsers are signed in by oauth2-proxy, which forwards the identity provider's
+ID token (`Authorization: Bearer`). Programmatic clients send `X-API-Key: tsk_...` to `/m2m/v1/...`.
+Members of several tenants choose one with `X-Toolsmith-Tenant`. Errors always have the shape
+`{"error": {"code": "...", "message": "..."}}`. Live events: WebSocket `/v1/ws` (same authentication;
+`?tenant=` selects the tenant)."""
+
+
+class ApiPrefixes:
+    """Routes every public prefix to the single /v1 mount.
+
+    /api/v1/... and /m2m/v1/... are aliases of /v1/.... The unversioned paths
+    of contract v1 (/..., /api/..., /m2m/...) still work for the current
+    frontend, but responses carry an RFC 9745 Deprecation header.
+    """
+
+    ALIASES = ("/api/v1", "/m2m/v1")
+    LEGACY = ("/api", "/m2m")
+    UNPREFIXED = {"/openapi.json"}
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    def route(self, path: str) -> tuple[str, str, bool]:
+        """Returns (new path, prefix that was replaced, deprecated)."""
+        if path == "/v1" or path.startswith("/v1/") or path in self.UNPREFIXED:
+            return path, "", False
+        for prefix in self.ALIASES:
+            if path.startswith(prefix + "/"):
+                return "/v1" + path[len(prefix):], prefix, False
+        for prefix in self.LEGACY:
+            if path.startswith(prefix + "/"):
+                rest = path[len(prefix):]
+                return "/v1" + rest, prefix, rest != "/health"
+        return "/v1" + path, "", path != "/health"
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in {"http", "websocket"}:
+            return await self.app(scope, receive, send)
+        path, prefix, deprecated = self.route(scope["path"])
+        raw = scope.get("raw_path") or scope["path"].encode()
+        raw = b"/v1" + raw[len(prefix):] if raw.startswith(prefix.encode()) and path != scope["path"] else raw
+        scope = {**scope, "path": path, "raw_path": raw}
+        if not deprecated or scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def marked(message):
+            if message["type"] == "http.response.start" and message["status"] != 404:
+                message = {**message, "headers": [*message.get("headers", []), (b"deprecation", b"true"),
+                                                  (b"link", b'</v1>; rel="successor-version"')]}
+            await send(message)
+
+        await self.app(scope, receive, marked)
+
+
+def describe_api(app: FastAPI) -> dict:
+    """OpenAPI with the two authentication schemes; generated once and cached."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(title=app.title, version=app.version, description=app.description,
+                         routes=app.routes, servers=app.servers)
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "oidcIdToken": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT",
+                        "description": "ID token of the identity provider, injected by oauth2-proxy."},
+        "apiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key",
+                   "description": "Tenant API key (analyst or viewer role)."},
+    }
+    schema["security"] = [{"oidcIdToken": []}, {"apiKey": []}]
+    for path, operations in schema["paths"].items():
+        if path.endswith("/health"):
+            for operation in operations.values():
+                operation["security"] = []
+    app.openapi_schema = schema
+    return schema
 
 
 def new_run_id() -> str:
@@ -182,7 +264,11 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.state.quotas = QuotaService(config, identity, app.state.run_repository, app.state.usage_repository)
         app.state.interrupted = await recover_unfinished_runs(app.state.run_repository)
 
-    app = FastAPI(title="Frankenstein", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(title="Toolsmith API", version=f"{CONTRACT_VERSION}.0", lifespan=lifespan, docs_url=None,
+                  redoc_url=None, openapi_url="/v1/openapi.json", description=API_DESCRIPTION,
+                  servers=[{"url": "/api", "description": "Browser, through oauth2-proxy (session cookie)"},
+                           {"url": "/m2m", "description": "Programmatic clients with an X-API-Key header"},
+                           {"url": "/", "description": "Inside the deployment network"}])
     register_handlers(app)
     app.state.settings = config
     app.state.store = RunStore()
@@ -201,16 +287,16 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins),
                            allow_methods=["GET", "POST"],
                            allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Toolsmith-Tenant"])
-    router = APIRouter()
+    router = APIRouter(responses=ERROR_RESPONSES)
     reader = Depends(requires(Permission.READ))
     runner = Depends(requires(Permission.RUN))
     decider = Depends(requires(Permission.DECIDE))
 
-    @router.get("/health")
+    @router.get("/health", response_model=HealthResponse)
     async def health():
         return {"status": "ok", "contract_version": CONTRACT_VERSION}
 
-    @router.get("/me")
+    @router.get("/me", response_model=MeResponse)
     async def me(principal: Principal = reader):
         return {"kind": principal.kind, "id": principal.id, "email": principal.email, "role": principal.role,
                 "tenant": {"id": str(principal.tenant_id), "slug": principal.tenant_slug},
@@ -267,7 +353,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         app.state.dispatcher.wake()
         return retry
 
-    @router.post("/runs", status_code=202)
+    @router.post("/runs", status_code=202, response_model=RunCreated)
     async def create_run(body: CreateRunBody, principal: Principal = runner):
         text = body.request.strip()
         if not 1 <= len(text) <= 2000:
@@ -284,7 +370,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         started = await app.state.dispatcher.fill()
         return {"run_id": record.id, "status": "running" if record.id in started else "queued"}
 
-    @router.post("/runs/{run_id:path}/cancel")
+    @router.post("/runs/{run_id:path}/cancel", response_model=RunStatusResponse)
     async def cancel_run(run_id: str, principal: Principal = runner):
         record = await stored_run(run_id, principal)
         if record.status == "queued":
@@ -303,7 +389,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         await asyncio.wait([run.task], timeout=10)
         return {"status": run.status}
 
-    @router.post("/runs/{run_id:path}/retry", status_code=202)
+    @router.post("/runs/{run_id:path}/retry", status_code=202, response_model=RunCreated)
     async def retry_run(run_id: str, principal: Principal = runner):
         record = await stored_run(run_id, principal)
         if record.status not in {"failed", "cancelled"}:
@@ -331,14 +417,14 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             raise ApiError(409, "NOT_AWAITING_APPROVAL", "This run is not awaiting approval.")
         return run
 
-    @router.get("/runs")
+    @router.get("/runs", response_model=RunsResponse)
     async def list_runs(limit: int = 50, principal: Principal = reader):
         if not 1 <= limit <= 200:
             raise ApiError(400, "INVALID_REQUEST", "limit must be between 1 and 200.")
         records = await app.state.run_repository.list(principal.tenant_id, limit=limit)
         return {"runs": [RunInfo.model_validate(r.info()).model_dump(mode="json") for r in records]}
 
-    @router.get("/runs/{run_id:path}/events")
+    @router.get("/runs/{run_id:path}/events", response_model=EventsResponse)
     async def get_events(run_id: str, after_seq: str = "0", principal: Principal = reader):
         run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
         if run is None:
@@ -354,13 +440,13 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         async with run.lock:
             return {"events": [e for e in run.events if e["seq"] > number]}
 
-    @router.post("/runs/{run_id:path}/approve")
+    @router.post("/runs/{run_id:path}/approve", response_model=DecisionResponse)
     async def approve_run(run_id: str, body: ApproveBody | None = None, principal: Principal = decider):
         run = await live_run(run_id, principal)
         return await approve(run, body.comment if body else None,
                              await app.state.gatekeepers.get(principal.tenant_id), app.state.emitter)
 
-    @router.post("/runs/{run_id:path}/reject")
+    @router.post("/runs/{run_id:path}/reject", response_model=DecisionResponse)
     async def reject_run(run_id: str, body: RejectBody, principal: Principal = decider):
         run = await live_run(run_id, principal)
         reason = body.reason.strip()
@@ -370,7 +456,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
 
     reviewer = Depends(requires(Permission.REVIEW_CODE))
 
-    @router.get("/runs/{run_id}/candidates")
+    @router.get("/runs/{run_id}/candidates", response_model=CandidatesResponse)
     async def list_candidates(run_id: str, principal: Principal = reader):
         run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
         if run is None:
@@ -379,7 +465,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
         tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
         return {"candidates": [c.model_dump(mode="json") for c in tenant_gatekeeper.candidates_info(run_id)]}
 
-    @router.get("/runs/{run_id}/candidates/{name}")
+    @router.get("/runs/{run_id}/candidates/{name}", response_model=ToolReview)
     async def review_candidate(run_id: str, name: str, principal: Principal = reviewer):
         run = app.state.store.find(run_id, principal.tenant_id) if RUN_ID.fullmatch(run_id) else None
         if run is None:
@@ -396,7 +482,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             raise ApiError(409, "INTEGRITY_VIOLATION", "The tool's files no longer match their verified "
                                                        "digests; they are not shown and cannot be approved.") from None
 
-    @router.get("/skills/{name}")
+    @router.get("/skills/{name}", response_model=ToolReview)
     async def review_skill(name: str, principal: Principal = reviewer):
         tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
         from gatekeeper.api import IntegrityError
@@ -413,7 +499,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     async def usage(principal: Principal = reader):
         return await app.state.quotas.report(principal.tenant_id)
 
-    @router.get("/skills")
+    @router.get("/skills", response_model=SkillsResponse)
     async def list_skills(principal: Principal = reader):
         tenant_gatekeeper = await app.state.gatekeepers.get(principal.tenant_id)
         return {"skills": [s.model_dump(mode="json") for s in tenant_gatekeeper.installed_skills()]}
@@ -455,9 +541,11 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     from orchestrator.admin_api import build_admin_router
 
     router.include_router(build_admin_router(config))
-    app.include_router(router)
-    app.include_router(router, prefix="/api")
-    # oauth2-proxy routes /m2m/ (API-key clients) here without a sign-in.
-    app.include_router(router, prefix="/m2m")
+    # One mount; ApiPrefixes maps /api/v1 (browsers via oauth2-proxy), /m2m/v1
+    # (API-key clients) and the deprecated unversioned paths onto /v1.
+    app.include_router(router, prefix="/v1")
+    app.add_middleware(ApiPrefixes)
+
+    app.openapi = lambda: describe_api(app)
     return app
 

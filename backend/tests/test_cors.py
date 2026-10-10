@@ -40,7 +40,7 @@ def test_unknown_origin_cannot_read_response_in_browser(client):
 
 @pytest.mark.parametrize("origin", ["http://localhost:3000", "https://unknown.example"])
 def test_unexpected_error_keeps_cors_policy(client, origin):
-    @client.app.get("/test-unexpected-error")
+    @client.app.get("/v1/test-unexpected-error")  # Every public path is served from /v1.
     async def unexpected_error():
         raise RuntimeError("Test failure")
 

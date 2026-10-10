@@ -105,3 +105,10 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Demo:** `docker-compose.demo.yml` keeps the no-sign-in demo (mock model, local tenant) on localhost ports 3000 and 8000.
 - **WebSocket origin:** The backend accepts WebSocket handshakes only from `CORS_ORIGINS` (by default the public URL). With cookie sessions, this blocks cross-site WebSocket hijacking: another site cannot open a socket with the victim's cookie.
 - **Secrets:** `scripts/bootstrap-env.sh` adds missing local secrets (`POSTGRES_PASSWORD`, `OAUTH2_PROXY_COOKIE_SECRET`) to an env file without changing or printing existing values.
+
+## D-016 Versioned API and a committed OpenAPI contract
+
+- **Decision:** The API lives under `/v1`. Browsers reach it as `/api/v1/...` through oauth2-proxy and nginx, and API-key clients as `/m2m/v1/...`. A small ASGI middleware maps these aliases, and the unversioned v1 paths the current frontend uses, onto one `/v1` mount. Unversioned paths keep working but answer with `Deprecation: true` and a `Link` to `/v1`. The schema is served at `/v1/openapi.json` and committed as `Docs/api/openapi.json`; a test fails when the code and the committed contract differ (`python backend/scripts/export_openapi.py` regenerates it).
+- **Why:** The frontend team and API customers need a contract they can rely on and review in pull requests. A breaking change will get `/v2` while `/v1` stays available.
+- **Why one mount:** Including the router once per prefix made FastAPI rebuild every response model for every copy, which slowed start-up (the test suite went from 37 s to 54 s). Path rewriting costs nothing per route.
+- **Errors:** Every error has the shape `{"error": {"code", "message"}}` with a stable code. The common error responses are documented for every operation.
