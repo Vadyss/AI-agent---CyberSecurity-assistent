@@ -59,3 +59,11 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Decision:** oauth2-proxy authenticates users with OIDC and forwards the provider's ID token as `Authorization: Bearer`. The backend verifies that token itself: signature against the provider's JWKS, `iss`, `aud` (the proxy's client ID, plus `azp` when there are several audiences), `exp` and `iat`, and a fixed list of asymmetric algorithms. Plain identity headers such as `X-Forwarded-User` or `X-Forwarded-Email` are ignored.
 - **Why:** You asked that the backend reject identities from requests that did not pass through the proxy. A header can be forged by anyone who reaches the backend directly; a provider signature cannot. The backend and frontend are also not published on the host in production; only oauth2-proxy is.
 - **Details:** Keys are cached for 10 minutes. An unknown key ID triggers at most one refetch per 30 seconds, so forged key IDs cannot flood the provider. During a provider outage the cached keys keep working.
+
+## D-010 Tenancy, roles and API keys
+
+- **Roles:** `viewer` can read; `analyst` can also start, cancel and retry runs, review candidate code and approve or reject; `admin` can also manage members, invitations, API keys, quotas, audit export and deletion. Permissions are checked in one place (`Principal.require`).
+- **Joining a tenant:** The provider proves identity; our database decides tenancy. Invitations apply only to an e-mail address the provider marks as verified. `BOOTSTRAP_ADMIN_EMAIL` creates the first tenant and its admin exactly once. Self-service tenant creation is off by default (`SIGNUP_MODE=invite_only`) and capped at three tenants per user when enabled.
+- **Choosing a tenant:** A user in one tenant needs nothing extra. A member of several tenants sends `X-Toolsmith-Tenant` (ID or slug). A request for a tenant the user does not belong to gets the same answer whether or not that tenant exists.
+- **API keys:** Format `tsk_<id>_<secret>`. Only the SHA-256 of the 256-bit secret is stored, and the full key is shown once. Keys belong to a tenant, have the `analyst` or `viewer` role (never `admin`; administration needs a human login), can expire and can be revoked. Invalid, revoked and expired keys get the same error.
+- **Safety rails:** A tenant always keeps at least one admin. Suspended tenants are refused.
