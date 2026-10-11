@@ -10,14 +10,14 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from orchestrator.main import create_app
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, make_settings
 
 
 def test_run_span_records_pipeline_events_and_requests_are_traced(tmp_path):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    app = create_app(settings=test_settings(data_dir=tmp_path), sandbox=InProcessSandbox(), tracer_provider=provider)
+    app = create_app(settings=make_settings(data_dir=tmp_path), sandbox=InProcessSandbox(), tracer_provider=provider)
     with TestClient(app) as client:
         run_id = client.post("/v1/runs", json={"request": "detect ssh brute force"}).json()["run_id"]
         deadline = time.monotonic() + 10

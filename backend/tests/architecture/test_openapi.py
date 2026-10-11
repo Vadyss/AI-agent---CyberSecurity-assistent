@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from orchestrator.main import create_app
-from tests.fakes import test_settings
+from tests.fakes import make_settings
 
 SNAPSHOT = Path(__file__).resolve().parents[3] / "Docs" / "api" / "openapi.json"
 
@@ -35,7 +35,7 @@ def test_contract_documents_authentication_and_errors():
 
 
 def test_versioned_routes_and_deprecated_unversioned_routes(tmp_path):
-    with TestClient(create_app(settings=test_settings(data_dir=tmp_path))) as client:
+    with TestClient(create_app(settings=make_settings(data_dir=tmp_path))) as client:
         for path in ("/v1/runs", "/api/v1/runs", "/m2m/v1/runs"):
             response = client.get(path)
             assert response.status_code == 200 and "Deprecation" not in response.headers, path

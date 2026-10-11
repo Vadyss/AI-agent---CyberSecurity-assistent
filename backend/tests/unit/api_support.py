@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 
 from gatekeeper.types import Metrics
-from tests.fakes import test_settings
+from tests.fakes import make_settings
 from orchestrator.main import create_app
 from orchestrator.run_store import PendingApproval
 
@@ -55,7 +55,7 @@ async def held_pipeline(run, gk, roles, emitter, settings, voice):
 
 def make_stub_app(tmp_path):
     gk = StubGatekeeper()
-    return create_app(settings=replace(test_settings(), data_dir=tmp_path, llm_provider="mock", mock_delay_ms=0),
+    return create_app(settings=replace(make_settings(), data_dir=tmp_path, llm_provider="mock", mock_delay_ms=0),
                       gatekeeper=gk, sandbox=StubSandbox(), roles=SimpleNamespace(),
                       pipeline_runner=held_pipeline), gk
 

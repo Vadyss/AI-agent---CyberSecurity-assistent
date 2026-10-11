@@ -33,7 +33,7 @@ class InProcessSandbox:
         pass
 
 
-def test_settings(**overrides):
+def make_settings(**overrides):
     """Settings for tests: the test environment, authentication disabled, mock model."""
     from orchestrator.config import Settings
 

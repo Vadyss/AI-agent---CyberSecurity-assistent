@@ -14,7 +14,7 @@ from orchestrator import main as main_module
 from orchestrator.main import create_app
 from storage.models import Tenant
 from storage.runs import RunRepository
-from tests.fakes import InProcessSandbox, tenant_data_dir, test_settings
+from tests.fakes import InProcessSandbox, tenant_data_dir, make_settings
 
 
 class FlakySandbox(InProcessSandbox):
@@ -36,7 +36,7 @@ async def held(run, gk, roles, emitter, settings, voice):
 def client_for(tmp_path, **kwargs):
     overrides = {key: kwargs.pop(key) for key in list(kwargs) if key in {"max_queued_runs_per_tenant", "run_max_attempts"}}
     sandbox = kwargs.pop("sandbox", None) or InProcessSandbox()
-    return TestClient(create_app(settings=test_settings(data_dir=tmp_path / "data", **overrides), sandbox=sandbox, **kwargs))
+    return TestClient(create_app(settings=make_settings(data_dir=tmp_path / "data", **overrides), sandbox=sandbox, **kwargs))
 
 
 def runs(client):

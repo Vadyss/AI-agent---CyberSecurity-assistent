@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from identity.service import IdentityService
 from orchestrator.main import create_app
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, make_settings
 from tests.identity_support import AUDIENCE, ISSUER, JWKS_URL, TestIdp, bearer, call
 
 FOUNDER = "founder@example.test"
@@ -22,7 +22,7 @@ def idp():
 
 @pytest.fixture
 def app_client(tmp_path, idp):
-    settings = test_settings(data_dir=tmp_path / "data", auth_mode="oidc", oidc_issuer=ISSUER,
+    settings = make_settings(data_dir=tmp_path / "data", auth_mode="oidc", oidc_issuer=ISSUER,
                              oidc_audience=AUDIENCE, oidc_jwks_url=JWKS_URL, bootstrap_admin_email=FOUNDER,
                              bootstrap_tenant_name="Acme", signup_mode="self_service")
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox(), oidc_transport=idp.transport())) as client:

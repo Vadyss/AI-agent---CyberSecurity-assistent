@@ -12,13 +12,13 @@ from identity.service import LOCAL_TENANT_ID
 from orchestrator.llm import TenantBudget, TenantBudgetExceeded, TenantSpend, count_call, count_cost
 from orchestrator.main import create_app
 from orchestrator.quotas import QuotaService
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, make_settings
 from tests.identity_support import call
 
 
 @pytest.fixture
 def client(tmp_path):
-    with TestClient(create_app(settings=test_settings(data_dir=tmp_path / "data"), sandbox=InProcessSandbox())) as client:
+    with TestClient(create_app(settings=make_settings(data_dir=tmp_path / "data"), sandbox=InProcessSandbox())) as client:
         yield client
 
 

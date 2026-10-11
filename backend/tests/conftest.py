@@ -35,9 +35,9 @@ def client(tmp_path):
     from fastapi.testclient import TestClient
 
     from orchestrator.main import create_app
-    from tests.fakes import InProcessSandbox, test_settings
+    from tests.fakes import InProcessSandbox, make_settings
 
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as client:
         yield client
 

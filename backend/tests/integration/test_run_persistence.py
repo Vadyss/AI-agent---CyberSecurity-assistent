@@ -14,7 +14,7 @@ from orchestrator.main import RESTART_REASON, create_app
 from storage.models import Tenant
 from storage.runs import RunRepository
 from tests.conftest import _truncate
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, make_settings
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ async def clean_postgres(postgres_url):
 
 
 def app_for(url, tmp_path, **kwargs):
-    settings = test_settings(data_dir=tmp_path / "data", database_url=url)
+    settings = make_settings(data_dir=tmp_path / "data", database_url=url)
     return create_app(settings=settings, sandbox=InProcessSandbox(), **kwargs)
 
 

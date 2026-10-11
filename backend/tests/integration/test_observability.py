@@ -12,11 +12,11 @@ from prometheus_client import generate_latest
 from gatekeeper.api import AUDIT_ACTOR
 from orchestrator.main import create_app
 from orchestrator.observability import REQUEST_ID, JsonFormatter, bind_log, LOG_FIELDS
-from tests.fakes import InProcessSandbox, test_settings
+from tests.fakes import InProcessSandbox, make_settings
 
 
 def make_client(tmp_path, sandbox=None):
-    return TestClient(create_app(settings=test_settings(data_dir=tmp_path), sandbox=sandbox or InProcessSandbox()))
+    return TestClient(create_app(settings=make_settings(data_dir=tmp_path), sandbox=sandbox or InProcessSandbox()))
 
 
 def test_json_log_lines_carry_context_but_never_exception_text():

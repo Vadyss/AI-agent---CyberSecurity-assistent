@@ -13,7 +13,7 @@ from gatekeeper.types import ParseFailure, SandboxError
 from orchestrator.llm import LlmError
 from orchestrator.main import create_app
 from tests.e2e.test_scenarios import start
-from tests.fakes import InProcessSandbox, tenant_data_dir, test_settings
+from tests.fakes import InProcessSandbox, tenant_data_dir, make_settings
 
 
 @pytest.mark.parametrize("error,code", [(LlmError("private provider error"), "LLM_ERROR"),
@@ -22,7 +22,7 @@ def test_planner_exception_releases_active_slot(tmp_path, error, code):
     class Planner:
         async def propose(self, *args, **kwargs):
             raise error
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
     roles = SimpleNamespace(planner=Planner())
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox(), roles=roles)) as client:
         run_id, events = start(client, "hello")
@@ -37,7 +37,7 @@ def test_timeout_never_leaves_running_state(tmp_path):
     class Planner:
         async def propose(self, *args, **kwargs):
             await asyncio.Event().wait()
-    settings = replace(test_settings(), llm_provider="mock", data_dir=tmp_path, run_timeout_s=.04)
+    settings = replace(make_settings(), llm_provider="mock", data_dir=tmp_path, run_timeout_s=.04)
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox(), roles=SimpleNamespace(planner=Planner()))) as client:
         run_id, events = start(client, "hello")
         assert events[-1]["data"]["reason_code"] == "INTERNAL_ERROR"
@@ -48,7 +48,7 @@ def test_three_invalid_plans_are_bounded_and_reported(tmp_path):
     class Planner:
         async def propose(self, *args, **kwargs):
             return ParseFailure("invalid")
-    settings = replace(test_settings(), llm_provider="mock", data_dir=tmp_path)
+    settings = replace(make_settings(), llm_provider="mock", data_dir=tmp_path)
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox(), roles=SimpleNamespace(planner=Planner()))) as client:
         _, events = start(client, "hello")
         assert [e["type"] for e in events] == ["run_started"] + ["policy_rejected"] * 3 + ["llm_usage", "run_failed"]
@@ -61,7 +61,7 @@ def test_sandbox_error_is_distinct_from_skill_test_failure(tmp_path):
             return False
         async def test(self, *args, **kwargs):
             raise SandboxError("unavailable")
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
     with TestClient(create_app(settings=settings, sandbox=UnavailableSandbox())) as client:
         _, events = start(client, "spray")
         assert events[-1]["data"]["reason_code"] == "SANDBOX_ERROR"
@@ -69,7 +69,7 @@ def test_sandbox_error_is_distinct_from_skill_test_failure(tmp_path):
 
 
 def test_llm_budget_is_per_run_and_counted(tmp_path):
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path, llm_max_calls_per_run=1)
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path, llm_max_calls_per_run=1)
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as client:
         run_id, events = start(client, "spray")
         assert events[-1]["data"]["reason_code"] == "LLM_ERROR"
@@ -78,7 +78,7 @@ def test_llm_budget_is_per_run_and_counted(tmp_path):
 
 def test_summary_failure_uses_fallback(tmp_path):
     from orchestrator.planner import make_roles
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path)
     roles = make_roles(settings)
     async def broken_summary(*args, **kwargs):
         raise LlmError("provider down")
@@ -90,7 +90,7 @@ def test_summary_failure_uses_fallback(tmp_path):
 
 
 def test_failed_run_saves_complete_usage_before_terminal_event(tmp_path):
-    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path,
+    settings = replace(make_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path,
                        llm_max_calls_per_run=1)
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as client:
         run_id, events = start(client, "Detect password spraying on SSH.")
