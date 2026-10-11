@@ -38,6 +38,8 @@ The suite (`backend/evals/cases.json`) covers the four attack types with dataset
 |---|---|---|---|---|---|---|---|
 | 2026-10-10 | mock | 1.0 | 1.0 | 1.0 | 0.667 | 1.0 | 1.0 |
 
+A manual series of live runs on 2026-10-09 (not produced by this harness) is summarised in [LLM_PROVIDERS.md](LLM_PROVIDERS.md#recorded-live-runs-2026-10-09).
+
 The mock row only proves the harness: the mock returns scripted proposals. No live baseline has been recorded yet, because it needs a model API key and spends real budget. Record the first one with the live command above.
 
 ## Limits

@@ -1,11 +1,11 @@
 <!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Token and cost tracking
 
-Implemented on `cost-tracking`, based on fetched `origin/main` at `eb40a67` (PR #21). No push, merge, deployment, production-data changes or paid model calls were performed. Environment configuration, agent prompts, policies, detection thresholds, datasets, sandbox settings and existing HTTP endpoints are unchanged.
+Every model call is recorded with its tenant, run, role, model, tokens, cost and prompt version. The browser shows the records in the **Model usage** panel of a run, and the run comparison uses the totals. The payload is the `llm_usage` event described in [EVENTS.md](EVENTS.md).
 
 ## Provider and call sites
 
-The configured path is an Apify Standby relay → Apify OpenRouter proxy → model provider. The application uses **HTTPX**, not an OpenAI or Anthropic SDK; the legacy synchronous compatibility function uses **requests**. Requests use the existing `/chat/completions` path and bearer header. There is no streaming. [OpenRouter usage documentation](https://openrouter.ai/docs/cookbook/administration/usage-accounting) confirms that non-streaming completions include native token usage, cost and cache information automatically; no additional request option is needed.
+The default path is an Apify Standby relay → Apify OpenRouter proxy → model provider (see [LLM_PROVIDERS.md](LLM_PROVIDERS.md)). The application uses **HTTPX**, not an OpenAI or Anthropic SDK; the legacy synchronous compatibility function uses **requests**. Requests use the existing `/chat/completions` path and bearer header. There is no streaming. [OpenRouter usage documentation](https://openrouter.ai/docs/cookbook/administration/usage-accounting) confirms that non-streaming completions include native token usage, cost and cache information automatically; no additional request option is needed.
 
 | Call site | Step | Configured model | Additional calls |
 |---|---|---|---|
@@ -45,14 +45,14 @@ Each content-free record includes run ID, call ID, step, role iteration, request
 
 Real provider token counts are never replaced by estimates. If only a total is reported, it is retained and unavailable splits remain null. If no usable token counts exist, an offline UTF-8 byte-level tokenizer counts content bytes and marks the record estimated. This is deliberately conservative and **not the model's native tokenizer**; chat framing, unknown output on transport failures and unknown cache savings cannot be reconstructed. Reasoning text can contribute to the fallback token count but is never used as an answer or retained in the ledger.
 
-`llm_usage` is the only added event type (contract version remains 1):
+`llm_usage` carries the records (see [EVENTS.md](EVENTS.md), section 6.9):
 
 - `kind: call`: `record`, running `totals`, and `summary: null` after each request attempt.
 - `kind: summary`: `record: null`, final `totals`, and a structured cost summary after LLM work finishes, before approval or run failure.
 
-Existing event sequencing, persistence-before-broadcast and terminal-event ordering are preserved. The existing event payloads and HTTP paths are unchanged. See `Docs/kontrakt.md`, section 10.8.
+Existing event sequencing, persistence-before-broadcast and terminal-event ordering are preserved.
 
-The public gatekeeper storage boundary provides a new isolated metadata store in `registry.py`; agent code still cannot write runtime files directly. Atomic snapshots are saved to `<DATA_DIR>/runs/<run_id>/usage.json` after every call and at completion, with mode 0600 and validated run IDs. Symlink storage paths are refused. This store does not modify candidates, skills, recipes, policy, audit-chain records or datasets. Storage failures are logged using the run ID only. Normal API runs bind their ledger once and reset it at completion. Standalone smoke/legacy diagnostics without a run binding retain usage only in memory; they are not API runs.
+The public gatekeeper storage boundary provides a new isolated metadata store in `registry.py`; agent code still cannot write runtime files directly. Atomic snapshots are saved to `runs/<run_id>/usage.json` in the tenant's data directory after every call and at completion, with mode 0600 and validated run IDs. Symlink storage paths are refused. This store does not modify candidates, skills, recipes, policy, audit-chain records or datasets. Storage failures are logged using the run ID only. Normal API runs bind their ledger once and reset it at completion. Standalone smoke/legacy diagnostics without a run binding retain usage only in memory; they are not API runs.
 
 ## Reading the UI and final summary
 
@@ -62,80 +62,11 @@ After LLM work completes, **Cost by step** shows each step's cost, one-decimal p
 
 A missing value appears as **—**. If a call's cost is unknown, the total cost stays unknown and **Known subtotal** is shown separately. Partial token totals behave similarly. Unknown-cost runs are excluded from the cost average rather than treated as zero. A valid provider cost remains usable even when individual token splits are unavailable. Old runs without usage events keep their existing summary/statistics and receive a one-line explanation in the new panel.
 
-## Frontend changes for the colleague
-
-- Added `Usage.tsx`, driven exclusively by `llm_usage` events already delivered through the existing store, HTTP history and WebSocket connection.
-- Added typed usage records/totals/summary in `types.ts`.
-- Added the compact usage panel to `DetectionRun.tsx`; live calls/tokens/cost also drive its statistics sidebar so unknown totals never become misleading subtotals. Older runs retain their existing statistics. Renamed the existing sidebar heading to **Run statistics** to distinguish it.
-- Comparison cost rows prefer full usage totals over legacy partial subtotals; new decimal costs retain exact strings. Existing metrics and older-run formatting remain unchanged.
-- Excluded usage events from the activity list so call charges are not duplicated in the timeline; event storage and status derivation are unchanged.
-- Added restrained, responsive styles using existing theme variables in `globals.css`.
-- Added seven rendering regressions in `frontend/tests/usage.test.mjs`.
-- Added only the backwards-compatible `llm_usage` event to the contract. Money strings are specific to the new event; existing stats remain compatible.
-
-Frontend work is in separate `feat(frontend):`/`fix(frontend):` commits. No new dependencies or environment changes were introduced.
-
-## Validation
-
-| Check | Result | Evidence |
-|---|---|---|
-| Full backend and sandbox suite | PASS, 721 tests | Python 3.12 test container, repository mounted read-only, `--network none`; includes the 49 sandbox tests |
-| Sandbox subset separately | PASS, 49 tests | Same offline test image, run from repository root |
-| Relay suite | PASS, 36 tests | Same offline test image, unchanged relay |
-| Frontend tests | PASS, 43 tests | `npm test` |
-| TypeScript and ESLint | PASS | `npx tsc --noEmit`, `npm run lint` |
-| Production Next.js export / image | PASS | `docker build -t frankenstein-cost-ui:local frontend` |
-| Chromium production-bundle checks | PASS, 8 checks, no console errors | `Docs/backend/usage_browser.json`; live WS record, cache metadata, final shares/average, reload, unknown charges/XSS, mobile, dark theme |
-| Real provider network calls in tests | None | Transport fakes, offline Docker tests, intercepted browser HTTP/WS |
-| Prompts, policy, data, thresholds and sandbox isolation | Unchanged | Full existing architecture, authority, injection and scenario regressions pass |
-
-Screenshots: `Docs/backend/screenshots-cost-tracking/{live,summary,mobile,dark}.png`. Browser checks run with a disposable frontend container on port 3100; the existing stack and data remain untouched. The local macOS Turbopack build cannot bind its worker port in this environment (EPERM); the same source builds and runs successfully through the project's production Dockerfile.
-
-The existing tests asserting exact event sequences were expanded to include usage events; none of the prior detection, policy, metric or sandbox assertions were removed. Existing cost assertions now check exact Decimal values where applicable; the legacy JSON-number assertions remain.
-
-## Remaining limitations
-
-Final verification was limited at the user's request to the new cost calculation and aggregation unit tests: **5 passed, 11 deselected**. No further builds, browser checks or development servers were started. The temporary preview was stopped. Broader results recorded above were completed before that request.
+## Limitations
 
 - DeepSeek uses provider-reported cost only (`usage.cost`); with no reported cost the call's cost stays unknown and no rate is guessed.
 - Inference usage does not establish the final Apify invoice, free-plan multiplier or relay hosting cost.
 - Missing provider usage cannot establish exact native tokens or unknown output/billing; estimates and partial totals are explicitly marked.
 - Usage records survive restarts; API run history remains process-local as before. Standalone diagnostics are not persisted API runs.
-- No paid live run was performed; accounting is verified with real client code and scripted provider responses, plus the production browser bundle.
+- Accounting is verified with the real client code and scripted provider responses; the test suite makes no paid model calls.
 
-## Changed files
-
-- `Docs/backend/COST_TRACKING.md`
-- `Docs/backend/screenshots-cost-tracking/dark.png`
-- `Docs/backend/screenshots-cost-tracking/live.png`
-- `Docs/backend/screenshots-cost-tracking/mobile.png`
-- `Docs/backend/screenshots-cost-tracking/summary.png`
-- `Docs/backend/usage_browser.json`
-- `Docs/kontrakt.md`
-- `backend/examiner/examiner.py`
-- `backend/gatekeeper/api.py`
-- `backend/gatekeeper/registry.py`
-- `backend/orchestrator/events.py`
-- `backend/orchestrator/llm.py`
-- `backend/orchestrator/llm_mock.py`
-- `backend/orchestrator/models.py`
-- `backend/orchestrator/pipeline.py`
-- `backend/orchestrator/pricing.json`
-- `backend/orchestrator/run_store.py`
-- `backend/orchestrator/usage.py`
-- `backend/tests/e2e/test_custom_attack.py`
-- `backend/tests/e2e/test_scenarios.py`
-- `backend/tests/integration/test_pipeline_failures.py`
-- `backend/tests/unit/test_english_output.py`
-- `backend/tests/unit/test_events.py`
-- `backend/tests/unit/test_llm_cost.py`
-- `backend/tests/unit/test_models.py`
-- `backend/tests/unit/test_usage_tracking.py`
-- `frontend/src/app/globals.css`
-- `frontend/src/components/Activity.tsx`
-- `frontend/src/components/Compare.tsx`
-- `frontend/src/components/DetectionRun.tsx`
-- `frontend/src/components/Usage.tsx`
-- `frontend/src/lib/types.ts`
-- `frontend/tests/usage.test.mjs`
-- `scripts/integration/usage_browser.mjs`

@@ -19,4 +19,4 @@ return generic HTTP 502; timeouts return HTTP 504. There are no automatic retrie
 
 Deploy from this directory with `apify login` and `apify push`.
 `usesStandbyMode: true` in `.actor/actor.json` enables Standby on push.
-Detailed commands and a curl test are in `Docs/backend/LLM_RELAY.md` in the repository.
+Detailed commands and a curl test are in `Docs/LLM_PROVIDERS.md` in the repository.
