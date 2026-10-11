@@ -1,9 +1,0 @@
-{
-  "status": "PASS",
-  "base": "http://localhost:3000",
-  "idle_ms": 180000,
-  "application_events_during_idle": 0,
-  "first_event_type": "run_started",
-  "run_id": "run_9ccfb84a",
-  "received_events": 1
-}

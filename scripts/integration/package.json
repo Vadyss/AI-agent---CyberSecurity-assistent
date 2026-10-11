@@ -1,1 +1,0 @@
-{"name":"frankenstein-integration-check","private":true,"author":"Adam Krúpa and Ondra Csajka","contributors":[{"name":"Adam Krúpa"},{"name":"Ondra Csajka"}],"license":"UNLICENSED","type":"module","devDependencies":{"playwright":"1.64.0"}}
