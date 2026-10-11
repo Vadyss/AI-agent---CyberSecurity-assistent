@@ -1,5 +1,0 @@
-Backend volá živé LLM výhradně přes Apify relay. Prázdné reasoning odpovědi vrací ParseFailure, length dostane jedno navýšení tokenového rozpočtu, dvě chyby primárního poskytovatele aktivují fallback pro zbytek běhu. Promptový JSON a ověřená konfigurace 16000 tokenů / reasoning low umožňují dokončit forge při zachování všech kontrol.
-
-Ověření: 613 backend/sandbox testů bez sítě + 36 relay testů; skutečné A/B/C/E každý dvakrát za sebou prošly tuning i validation s precision=recall=1.0, B znovu použilo schválenou dovednost A. Záložní mock HTTP/WS demo a místní stack bez overridu na portu 3000 prošly. Gatekeeper, politika, prahy, data, frontend, mock, nginx i kontrakt beze změny. Důkazy a omezení jsou v Docs/backend/LLM_LIVE_TEST.md, přesné A/B events v Docs/backend/live_runs/run_a.json a run_b.json.
-
-Omezení: LLM může potřebovat vnitřní opravný pokus; relay má vlastní 120s upstream timeout. Skutečný maximální tokenový limit poskytovatele se neurčil a volitelný Examiner zůstává výchozí vypnutý.
