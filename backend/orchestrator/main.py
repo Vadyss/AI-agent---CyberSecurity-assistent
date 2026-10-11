@@ -600,7 +600,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.include_router(router, prefix="/v1")
     app.add_middleware(ApiPrefixes)
     # Outermost: every request, including rewritten ones, gets an ID and an access line.
-    app.add_middleware(RequestContext, metrics=app.state.metrics)
+    app.add_middleware(RequestContext, metrics=app.state.metrics, mount_prefix="/v1")
     app.state.tracer_provider = setup_tracing(app, config, APP_VERSION, provider=tracer_provider)
     app.state.tracer = tracer_for(app.state.tracer_provider)
 

@@ -83,9 +83,11 @@ def configure_logging(level: str, environment: str, log_format: str) -> None:
 class RequestContext:
     """Assigns a request ID, returns it as X-Request-ID and writes one access line per request."""
 
-    def __init__(self, app, metrics=None) -> None:
+    def __init__(self, app, metrics=None, mount_prefix: str = "") -> None:
         self.app = app
         self.metrics = metrics
+        # FastAPI >= 0.140 keeps included routers whole, so route paths are relative to the mount.
+        self.mount_prefix = mount_prefix
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"}:
@@ -111,6 +113,9 @@ class RequestContext:
             duration = time.monotonic() - started
             route = scope.get("route")
             template = getattr(route, "path", None) or "unmatched"
+            if (template != "unmatched" and self.mount_prefix and not template.startswith(self.mount_prefix + "/")
+                    and scope.get("path", "").startswith(self.mount_prefix + "/")):
+                template = self.mount_prefix + template
             method = scope.get("method", "WS")
             if self.metrics is not None:
                 self.metrics.observe_request(method, template, status["code"], duration)
