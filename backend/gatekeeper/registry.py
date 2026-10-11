@@ -382,7 +382,7 @@ class Registry:
                 raise IntegrityError("The run already has an approved rule.")
             installed = []
             try:
-                for name, (_, manifest, meta) in artifacts.items():
+                for name, (_, _, meta) in artifacts.items():
                     folder = self._candidate_path(run_id, name)
                     stage = self.registry_dir / f".tmp-{name}-{uuid.uuid4().hex}"
                     stage.mkdir()

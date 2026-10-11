@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationInfo, field_validator
 
-from gatekeeper.types import Metrics, SkillInfo, Thresholds, Violation
+from gatekeeper.types import Metrics, SkillInfo, Violation
 from orchestrator.text import clip
 
 Phase = Literal["intake", "plan", "forge", "rule", "validation", "approval", "done"]

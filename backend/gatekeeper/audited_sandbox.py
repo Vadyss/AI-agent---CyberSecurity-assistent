@@ -48,6 +48,14 @@ class AuditedSandbox:
     async def close(self) -> None:
         await self.inner.close()
 
+    async def execute(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Raw job execution, audited like run and test (completes SandboxProtocol)."""
+        raw_files = job.get("files")
+        files: dict[str, Any] = raw_files if isinstance(raw_files, dict) else {}
+        inputs = {"inputs": job.get("inputs"), "params": job.get("params"),
+                  "tests_sha256": digest(files["test_skill.py"]) if isinstance(files.get("test_skill.py"), str) else None}
+        return await self._execute(str(job.get("mode")), str(files.get("skill.py", "")), inputs, self.inner.execute(job))
+
     async def run(self, code: str, inputs: list, params: dict, *,
                   allowed_imports: list[str], timeout_s: float = 15) -> dict[str, Any]:
         return await self._execute("run", code, {"inputs": inputs, "params": params},

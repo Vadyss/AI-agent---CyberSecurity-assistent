@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from gatekeeper.types import ParseFailure, SandboxError
+from gatekeeper.types import SandboxError
 from orchestrator.llm import LlmBudgetExceeded, LlmError, TenantBudgetExceeded, bind_run_counters, reset_run_counters
 from orchestrator.run_store import PendingApproval
 from orchestrator.sandbox_messages import present_sandbox_error

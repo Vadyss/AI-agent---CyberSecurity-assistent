@@ -27,6 +27,8 @@ API_KEY_ROLES = ("analyst", "viewer")
 class IdentityError(Exception):
     """A client-safe authentication or authorization failure."""
 
+    retry_after: int | None = None  # Seconds, for 429 answers.
+
     def __init__(self, status: int, code: str, message: str) -> None:
         super().__init__(message)
         self.status, self.code, self.message = status, code, message

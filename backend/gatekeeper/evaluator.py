@@ -138,7 +138,7 @@ async def evaluate_recipe(recipe: dict, lines: list[str], labels: dict,
     for step in recipe.get("enrich", []):
         original = deepcopy(events)
         def valid_enrich(output, manifest):
-            return isinstance(output, list) and len(output) == len(original) and all(isinstance(enriched, dict) and all(k in enriched and enriched[k] == v for k, v in old.items()) and all(field in enriched for field in manifest["outputs"]) for old, enriched in zip(original, output))
+            return isinstance(output, list) and len(output) == len(original) and all(isinstance(enriched, dict) and all(k in enriched and enriched[k] == v for k, v in old.items()) and all(field in enriched for field in manifest["outputs"]) for old, enriched in zip(original, output))  # noqa: B023 - called within this iteration only
         events = await run(step["skill"], events, step["params"], valid_enrich)
         if events is None:
             metrics, cross = calculate_metrics([], labels, recipe["attack_type"], policy.thresholds)

@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from orchestrator.config import Settings
 from orchestrator.llm import LlmResult, count_call
 from orchestrator.llm_mock import MockLlm
 from orchestrator.main import create_app

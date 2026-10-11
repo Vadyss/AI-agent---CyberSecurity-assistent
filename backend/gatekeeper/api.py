@@ -20,7 +20,7 @@ from .recipe import check_recipe, display_recipe
 from .registry import IntegrityError, Registry, UsageStore, recipe_sha256
 from .sandbox_client import SandboxClient
 from .static_analysis import analyze_code
-from .types import GatekeeperConfig, ParseFailure, PlanVerdict, SkillVerdict, Violation
+from .types import GatekeeperConfig, PlanVerdict, SkillVerdict, Violation
 
 
 # Re-exported for the orchestrator, which may only import this public boundary.

@@ -214,7 +214,7 @@ async def test_failures_rejections_lessons_and_discard(gk):
     checked['condition']['value']=9999
     plan=gk._plans[RUN].model_copy(deep=True)
     gk.check_recipe(RUN,plan,checked)
-    result=await gk.evaluate_tuning(RUN,checked)
+    await gk.evaluate_tuning(RUN,checked)
     gk.record_failure(RUN,'RULE_FAILED','Rule nesplnilo hranice.',checked)
     lesson=gk.lessons(5,'ssh_password_spraying')[-1]
     assert lesson['kind']=='RULE_FAILED' and lesson['recipe_shape']['condition']['value']==9999

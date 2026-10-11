@@ -34,7 +34,6 @@ def client(tmp_path):
 
     from fastapi.testclient import TestClient
 
-    from orchestrator.config import Settings
     from orchestrator.main import create_app
     from tests.fakes import InProcessSandbox, test_settings
 

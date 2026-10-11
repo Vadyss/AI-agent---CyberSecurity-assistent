@@ -8,6 +8,23 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linters
+        run: pip install ruff==0.17.0 mypy==2.4.0 types-PyYAML==6.0.12.20260906 types-requests==2.33.0.20261006
+      - name: Ruff (pyflakes, bugbear, syntax)
+        run: ruff check backend sandbox apify scripts
+      - name: Install backend dependencies for type checking
+        run: pip install -r backend/requirements.txt
+      - name: Mypy (platform modules, see backend/mypy.ini)
+        working-directory: backend
+        run: mypy
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -114,7 +131,7 @@ jobs:
         run: docker compose --env-file .ci.env -p toolsmith-dev -f docker-compose.yml -f docker-compose.dev.yml down -v
 
   deploy:
-    needs: [test, frontend-test, integration, auth-integration]
+    needs: [lint, test, frontend-test, integration, auth-integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, ARM64]
     steps:

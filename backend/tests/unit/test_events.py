@@ -1,7 +1,6 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 from __future__ import annotations
 
-import asyncio
 import re
 
 import pytest

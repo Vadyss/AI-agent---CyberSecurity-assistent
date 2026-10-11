@@ -6,8 +6,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 
 import sqlalchemy as sa
+from sqlalchemy.engine import CursorResult
 
 from .db import Database
 from .models import Run, RunEvent
@@ -103,7 +105,7 @@ class RunRepository:
         async with self.db.session() as session:
             result = await session.execute(sa.update(Run).where(Run.id == run_id, Run.status == "queued").values(
                 status="cancelled", cancel_requested=True, finished_at=utcnow(), reason_code="CANCELLED"))
-            return result.rowcount == 1
+            return cast(CursorResult, result).rowcount == 1
 
     async def request_cancel(self, run_id: str) -> None:
         async with self.db.session() as session:
@@ -116,7 +118,7 @@ class RunRepository:
                 return None
             return RunRecord.of(row)
 
-    async def list(self, tenant_id: uuid.UUID, *, limit: int = 50,
+    async def list_runs(self, tenant_id: uuid.UUID, *, limit: int = 50,
                    before: tuple[datetime, str] | None = None) -> list[RunRecord]:
         query = sa.select(Run).where(Run.tenant_id == tenant_id)
         if before is not None:

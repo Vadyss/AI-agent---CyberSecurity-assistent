@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from gatekeeper.types import GatekeeperConfig
 
@@ -80,7 +81,7 @@ class Settings:
             from dotenv import load_dotenv
 
             load_dotenv()
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         defaults = cls()
         for name in cls.__dataclass_fields__:
             raw = os.environ.get(name.upper())

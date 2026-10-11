@@ -97,4 +97,4 @@ async def test_foreign_tenant_cannot_read_a_stored_run(database):
     assert await repository.get("run_bbbb000000000001", one.id) is not None
     assert await repository.get("run_bbbb000000000001", two.id) is None
     assert await repository.get("run_bbbb000000000001", uuid.uuid4()) is None
-    assert await repository.list(two.id) == []
+    assert await repository.list_runs(two.id) == []

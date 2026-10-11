@@ -57,7 +57,7 @@ class UsageRepository:
                           ).where(LlmUsage.tenant_id == tenant_id, LlmUsage.created_at >= since)
         async with self.db.session() as session:
             known, unknown, calls, tokens = (await session.execute(query)).one()
-        return Spend(Decimal(str(known)), unknown, calls, int(tokens))
+        return Spend(Decimal(str(known)), unknown, calls, int(tokens or 0))
 
     async def by_model(self, tenant_id: uuid.UUID, since: datetime) -> list[dict]:
         query = (sa.select(LlmUsage.model, sa.func.count(), sa.func.coalesce(sa.func.sum(LlmUsage.cost_usd), 0),
@@ -67,4 +67,4 @@ class UsageRepository:
         async with self.db.session() as session:
             rows = (await session.execute(query)).all()
         return [{"model": model, "calls": calls, "known_cost_usd": format(Decimal(str(cost)).normalize(), "f"),
-                 "tokens": int(tokens)} for model, calls, cost, tokens in rows]
+                 "tokens": int(tokens or 0)} for model, calls, cost, tokens in rows]

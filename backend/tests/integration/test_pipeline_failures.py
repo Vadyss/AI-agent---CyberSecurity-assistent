@@ -10,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gatekeeper.types import ParseFailure, SandboxError
-from orchestrator.config import Settings
 from orchestrator.llm import LlmError
 from orchestrator.main import create_app
 from tests.e2e.test_scenarios import start

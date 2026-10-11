@@ -469,7 +469,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     async def list_runs(limit: int = 50, principal: Principal = reader):
         if not 1 <= limit <= 200:
             raise ApiError(400, "INVALID_REQUEST", "limit must be between 1 and 200.")
-        records = await app.state.run_repository.list(principal.tenant_id, limit=limit)
+        records = await app.state.run_repository.list_runs(principal.tenant_id, limit=limit)
         return {"runs": [RunInfo.model_validate(r.info()).model_dump(mode="json") for r in records]}
 
     @router.get("/runs/{run_id:path}/events", response_model=EventsResponse)

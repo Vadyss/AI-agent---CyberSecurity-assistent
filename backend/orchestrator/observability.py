@@ -18,14 +18,14 @@ from datetime import datetime, timezone
 from gatekeeper.api import AUDIT_ACTOR
 
 REQUEST_ID: ContextVar[str | None] = ContextVar("request_id", default=None)
-LOG_FIELDS: ContextVar[dict] = ContextVar("log_fields", default={})
+LOG_FIELDS: ContextVar[dict | None] = ContextVar("log_fields", default=None)
 INCOMING_ID = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 access_logger = logging.getLogger("toolsmith.access")
 
 
 def bind_log(**fields) -> object:
     """Add fields (tenant_id, run_id) to every log line in the current context."""
-    return LOG_FIELDS.set({**LOG_FIELDS.get(), **{k: str(v) for k, v in fields.items() if v is not None}})
+    return LOG_FIELDS.set({**(LOG_FIELDS.get() or {}), **{k: str(v) for k, v in fields.items() if v is not None}})
 
 
 class JsonFormatter(logging.Formatter):
@@ -39,7 +39,7 @@ class JsonFormatter(logging.Formatter):
         actor = AUDIT_ACTOR.get()
         if actor:
             payload["actor"] = actor
-        payload.update(LOG_FIELDS.get())
+        payload.update(LOG_FIELDS.get() or {})
         payload.update(getattr(record, "fields", {}))
         span = _current_span_ids()
         if span:

@@ -5,10 +5,8 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 
-from gatekeeper.types import Metrics, SkillInfo
-from orchestrator.config import Settings
+from gatekeeper.types import Metrics
 from tests.fakes import test_settings
 from orchestrator.main import create_app
 from orchestrator.run_store import PendingApproval

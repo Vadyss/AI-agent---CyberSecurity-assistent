@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from identity.service import IdentityService
-from tests.identity_support import ISSUER, bearer, call, unsigned_token, wait_finished
+from tests.identity_support import bearer, call, unsigned_token, wait_finished
 from tests.integration.conftest import FOUNDER
 
 @pytest.mark.parametrize("method,path", [("get", "/me"), ("get", "/runs"), ("post", "/runs"), ("get", "/skills"),

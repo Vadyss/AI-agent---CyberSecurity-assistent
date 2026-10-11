@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from orchestrator.models import DATA_MODELS, Metrics, RunStats, SkillInfo
+from orchestrator.models import DATA_MODELS, Metrics
 
 
 def test_every_contract_payload_example_is_accepted():

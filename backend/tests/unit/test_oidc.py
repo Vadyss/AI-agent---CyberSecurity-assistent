@@ -8,7 +8,6 @@ import json
 import time
 
 import httpx
-import jwt
 import pytest
 
 from identity.oidc import JwksCache, OidcVerifier, ProviderUnavailable, TokenError

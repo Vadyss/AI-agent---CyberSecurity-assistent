@@ -154,8 +154,7 @@ class IdentityService:
             valid = apikeys.matches(secret, key.secret_sha256 if key else "0" * 64)
             if key is None or not valid or key.revoked_at is not None or (key.expires_at and key.expires_at <= now):
                 raise refused
-            tenant = await session.get(Tenant, key.tenant_id)
-            self._require_active(tenant)
+            tenant = self._require_active(await session.get(Tenant, key.tenant_id))
             if key.last_used_at is None or now - key.last_used_at > KEY_TOUCH_INTERVAL:
                 key.last_used_at = now
             return Principal("api_key", key.id, tenant.id, tenant.slug, key.role)
@@ -233,6 +232,8 @@ class IdentityService:
             raise IdentityError(400, "INVALID_REQUEST", "The daily run limit must not be negative.")
         async with self.db.session() as session:
             tenant = await session.get(Tenant, tenant_id)
+            if tenant is None:
+                raise IdentityError(404, "NOT_FOUND", "Tenant not found.")
             tenant.monthly_budget_usd, tenant.max_runs_per_day = monthly_budget_usd, max_runs_per_day
             return tenant
 
@@ -294,11 +295,12 @@ class IdentityService:
     # --- Helpers -------------------------------------------------------------
 
     @staticmethod
-    def _require_active(tenant: Tenant | None) -> None:
+    def _require_active(tenant: Tenant | None) -> Tenant:
         if tenant is None:
             raise IdentityError(403, "TENANT_FORBIDDEN", "You are not a member of this tenant.")
         if tenant.status != "active":
             raise IdentityError(403, "TENANT_SUSPENDED", "This tenant is suspended.")
+        return tenant
 
     @staticmethod
     async def _membership(session, tenant_id: uuid.UUID, user_id: uuid.UUID) -> Membership:
