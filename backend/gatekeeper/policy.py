@@ -147,7 +147,3 @@ def load_policy(path: Path) -> Policy:
     if not isinstance(raw, dict) or "sha256" in raw:
         raise ValueError("Invalid policy structure.")
     return Policy.model_validate({**raw, "sha256": hashlib.sha256(payload).hexdigest()})
-
-
-def policy_digest_for_llm(policy: Policy) -> dict:
-    return policy.digest_for_llm()
