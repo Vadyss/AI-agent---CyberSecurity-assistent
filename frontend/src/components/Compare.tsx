@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 import { dataOf, formatCost, formatDuration, formatNumber, lastOf, runRequest, runStatus } from "@/lib/derive";
 import type { RunState } from "@/lib/engine";
 import type { RunStats } from "@/lib/types";

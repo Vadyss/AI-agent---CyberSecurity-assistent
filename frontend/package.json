@@ -7,7 +7,7 @@
     { "name": "Adam Krúpa" },
     { "name": "Ondra Csajka" }
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

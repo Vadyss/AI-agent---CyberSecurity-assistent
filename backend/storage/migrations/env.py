@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Alembic environment. The URL comes from DATABASE_URL, never from a file."""
 from __future__ import annotations
 

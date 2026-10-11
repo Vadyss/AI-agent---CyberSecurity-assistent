@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Security policy
 
 Toolsmith writes code with a language model and runs it. Security is the core of the product, and reports are welcome.

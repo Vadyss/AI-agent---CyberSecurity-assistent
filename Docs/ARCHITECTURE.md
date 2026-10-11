@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Architecture
 
 Toolsmith is an agent for security analysts. An analyst describes an attack; the agent plans the work, builds the tools it is missing (log parsers, aggregations, enrichments), tests them in an isolated sandbox, drafts a detection rule, validates it on independent data and asks a human to approve. Approved tools join the tenant's library and are reused by later runs.

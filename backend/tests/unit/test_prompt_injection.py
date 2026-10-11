@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Analysed data (requests, logs, lessons, sandbox errors) never reaches a model as instructions."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Async engine and sessions. PostgreSQL in every deployment; SQLite only in tests."""
 from __future__ import annotations
 

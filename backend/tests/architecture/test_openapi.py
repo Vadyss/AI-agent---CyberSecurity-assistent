@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """The published API contract stays in sync with the code."""
 from __future__ import annotations
 

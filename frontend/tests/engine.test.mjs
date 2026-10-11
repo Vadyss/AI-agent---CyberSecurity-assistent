@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { productionModule } from "./load-production-module.mjs";

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Users, tenants, memberships, invitations and API keys.
 
 A verified identity-provider token proves who someone is. Membership rows

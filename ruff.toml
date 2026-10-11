@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 # Lint for real defects (pyflakes, syntax errors, bugbear), not formatting.
 target-version = "py312"
 line-length = 130

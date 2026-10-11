@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Token and cost tracking
 
 Implemented on `cost-tracking`, based on fetched `origin/main` at `eb40a67` (PR #21). No push, merge, deployment, production-data changes or paid model calls were performed. Environment configuration, agent prompts, policies, detection thresholds, datasets, sandbox settings and existing HTTP endpoints are unchanged.

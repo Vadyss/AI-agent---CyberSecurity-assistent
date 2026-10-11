@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Evaluating the agent
 
 `backend/evals` runs analyst requests with known correct outcomes through the real API, gatekeeper and sandbox, and reports how well each model-backed role does. Each case starts from a fresh tenant with only the seed tools, so earlier cases cannot help later ones.

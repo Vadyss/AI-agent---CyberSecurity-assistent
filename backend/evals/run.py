@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Run the evaluation cases through the real API, gatekeeper and sandbox.
 
     python -m evals.run --provider mock            # deterministic harness check (free)

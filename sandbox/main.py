@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Compatibility entrypoint for existing ``uvicorn main:app`` commands."""
 from __future__ import annotations
 

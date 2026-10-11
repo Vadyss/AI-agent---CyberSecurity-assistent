@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Gatekeeper-owned contract fixtures; submitted code runs only in sandbox."""
 from __future__ import annotations
 

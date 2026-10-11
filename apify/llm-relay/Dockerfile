@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 FROM python:3.12-slim
 LABEL org.opencontainers.image.authors="Adam Krúpa, Ondra Csajka"
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";

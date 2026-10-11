@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Verification of identity-provider tokens forwarded by oauth2-proxy.
 
 The backend never trusts identity headers such as X-Forwarded-User. It

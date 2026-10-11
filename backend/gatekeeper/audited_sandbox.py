@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Every sandbox execution leaves a hash-chained audit record.
 
 Records hold digests only: which tool version ran, and SHA-256 of the

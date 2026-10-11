@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Durable queue: ordering, per-tenant exclusivity, retries and cancellation."""
 from __future__ import annotations
 

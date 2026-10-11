@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """End-to-end check of the sign-in chain of the development stack.
 
 Browser flow through oauth2-proxy and the mock provider, API calls with the

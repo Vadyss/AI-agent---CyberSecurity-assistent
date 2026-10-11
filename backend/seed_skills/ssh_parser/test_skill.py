@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 from skill import run
 
 PREFIX = "2026-10-05T08:01:12.123456+02:00 bastion sshd[5120]: "

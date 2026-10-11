@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -13,7 +13,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en-US">
       <body>
         {children}
-        <footer className="workspace-footer">© 2026 Adam Krúpa &amp; Ondra Csajka. All rights reserved.</footer>
+        <footer className="workspace-footer">© 2026 Adam Krúpa &amp; Ondra Csajka. MIT License.</footer>
       </body>
     </html>
   );

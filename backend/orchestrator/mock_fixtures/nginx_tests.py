@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 from skill import run
 
 FAILED = '203.0.113.50 - - [05/Oct/2026:10:00:01 +0200] "GET /admin.php HTTP/1.1" 404 153 "-" "Mozilla/5.0"'

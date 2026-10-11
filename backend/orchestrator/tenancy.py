@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """One gatekeeper per tenant: separate tool registry, candidates, lessons and audit chain."""
 from __future__ import annotations
 

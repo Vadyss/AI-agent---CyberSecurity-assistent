@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Threat model
 
 Scope: a multi-tenant Toolsmith deployment (D-015). The central risk of a self-building agent is that it **writes code and runs it**. The model's output is untrusted, and so is everything the model reads (analyst requests, log samples, lessons, error output).

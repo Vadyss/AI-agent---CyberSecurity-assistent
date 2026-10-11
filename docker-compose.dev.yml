@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 # Local development with real sign-in: oauth2-proxy in front of everything and
 # a throwaway OIDC provider (navikt mock-oauth2-server). It accepts ANY user
 # name, so never expose it beyond localhost. Start with scripts/dev-up.sh.

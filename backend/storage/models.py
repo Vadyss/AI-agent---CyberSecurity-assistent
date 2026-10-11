@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """SQLAlchemy schema. Alembic migrations in ``storage/migrations`` own the real DDL."""
 from __future__ import annotations
 

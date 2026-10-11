@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Structured JSON logs, request IDs and an access log without secrets.
 
 Every log line is one JSON object with the request ID and, when known, the

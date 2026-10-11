@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """LLM transport, bounded retries, per-run accounting and JSON extraction."""
 from __future__ import annotations
 

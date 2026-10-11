@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Verified private datasets. Only the bounded tuning sample leaves gatekeeper."""
 from __future__ import annotations
 

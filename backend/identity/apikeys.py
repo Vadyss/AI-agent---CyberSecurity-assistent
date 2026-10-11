@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """API key format: ``tsk_<16 hex id>_<43 char secret>``.
 
 Only the SHA-256 of the secret is stored. The secret has 256 bits of

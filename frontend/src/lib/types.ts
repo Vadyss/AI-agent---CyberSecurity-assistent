@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 // Data types per docs/kontrakt.md (chapters 6, 9, 10).
 // Fields marked [untrusted] are always rendered as plain text.
 

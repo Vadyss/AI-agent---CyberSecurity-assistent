@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 // Values derived from events (contract chapters 11 and 12.5).
 import type { RunState } from "./engine";
 import {

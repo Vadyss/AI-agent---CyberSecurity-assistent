@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """A local identity provider for tests: real RSA keys, a JWKS endpoint, signed tokens."""
 from __future__ import annotations
 

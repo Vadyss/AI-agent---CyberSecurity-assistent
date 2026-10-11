@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Initial schema: tenants, identities, API keys, runs, run events and LLM usage.
 
 Revision ID: 0001

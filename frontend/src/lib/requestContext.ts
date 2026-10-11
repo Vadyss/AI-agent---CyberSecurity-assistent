@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+// Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 export const MAX_REQUEST_CHARACTERS = 2000;
 export const MAX_CONTEXT_FILES = 3;
 export const MAX_CONTEXT_FILE_BYTES = 256 * 1024;

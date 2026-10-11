@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Privacy notes (GDPR)
 
 Technical notes for the operator of a Toolsmith deployment and for customers' data protection officers. They describe what the software stores and how to honour data-subject rights. They are not legal advice; the operator remains responsible for its own records of processing, contracts and notices.

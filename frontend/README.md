@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Frankenstein frontend
 
 The Next.js frontend connects directly from the browser to the FastAPI backend. The default address is `http://127.0.0.1:8000`. HTTP requests use `/health`, `/runs`, and `/skills`; the WebSocket address is `ws://127.0.0.1:8000/ws`.

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Authentication, roles and tenant isolation through the real HTTP and WebSocket API."""
 from __future__ import annotations
 

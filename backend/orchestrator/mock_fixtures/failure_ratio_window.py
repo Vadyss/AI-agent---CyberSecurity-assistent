@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 def run(inputs, params):
     fields = params["group_by"]
     fields = [fields] if isinstance(fields, str) else fields

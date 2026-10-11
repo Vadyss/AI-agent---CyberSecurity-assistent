@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 from copy import deepcopy
 import pytest
 from gatekeeper.evaluator import merge_incidents, calculate_metrics, evaluate_recipe, parser_output_valid, aggregation_output_valid, SkillExecutionError

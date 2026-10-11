@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Prometheus metrics, served on a separate internal port (METRICS_PORT).
 
 Labels never contain tenant IDs, user data or run IDs: that keeps cardinality

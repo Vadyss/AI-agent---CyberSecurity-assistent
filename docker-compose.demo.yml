@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 # Use a separate project when another stack already owns port 3000.
 # Demo mode: development environment, mock model, authentication disabled
 # (one local tenant). Never expose this overlay beyond localhost.

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Shape of each role's JSON output, checked at the model boundary.
 
 These schemas check structure only: required keys and their types. Whether

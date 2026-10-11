@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Operations guide
 
 How to deploy, configure, observe, back up and update a Toolsmith installation. The target is one Linux host with Docker Compose (see `Docs/DECISIONS.md`, D-013 and D-015).

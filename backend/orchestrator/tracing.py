@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Optional OpenTelemetry tracing, active only when OTEL_EXPORTER_OTLP_ENDPOINT is set.
 
 Spans: every HTTP request, one ``toolsmith.run`` span per run with its

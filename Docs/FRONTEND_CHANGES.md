@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
+<!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License. -->
 # Changes the frontend needs
 
 The backend became multi-tenant, authenticated and versioned on the `saas-hardening` branch. The frontend code was not changed. This list says what the frontend must change, in priority order. The full contract is `Docs/api/openapi.json` (served at `/api/v1/openapi.json`).

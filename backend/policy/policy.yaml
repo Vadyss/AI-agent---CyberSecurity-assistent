@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 version: 1
 authority:
   note: "Neměnná autorita vrátného. Běžící aplikace tento soubor nikdy nezapisuje."

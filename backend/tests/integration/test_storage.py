@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
 """Schema guarantees, checked on both SQLite and migrated PostgreSQL."""
 from __future__ import annotations
 
