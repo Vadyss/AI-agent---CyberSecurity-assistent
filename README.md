@@ -67,7 +67,7 @@ You need Docker with Compose v2 and about 2 GB of free disk space for the images
    ```
 
 3. Open <http://localhost:3000>. The status pill at the top right should read **Connected**.
-4. Click the example **Password spraying** and then **Build detection**. The mock model answers in about a minute; the activity list shows the plan, the tool the agent builds and its tests, the drafted rule and the tuning and validation results.
+4. Click the example **Password spraying** and then **Build detection**. The mock model needs well under a minute; the activity list shows the plan, the tool the agent builds and its tests, the drafted rule and the tuning and validation results.
 5. When the run reaches **Needs review**, open the code and the metrics, then choose **Approve and install**. The new tool appears in the **Skill library**.
 6. Start **Distributed brute force**. This time the agent reuses the tool you approved instead of building it.
 7. Stop with `Ctrl+C`; remove the demo data with `docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v`.
