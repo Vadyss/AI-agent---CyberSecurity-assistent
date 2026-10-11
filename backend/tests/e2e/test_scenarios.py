@@ -5,14 +5,12 @@ import hashlib
 import json
 import time
 from dataclasses import replace
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from gatekeeper.audit import verify_audit
-from orchestrator.config import Settings
 from orchestrator.main import create_app
-from tests.fakes import InProcessSandbox
+from tests.fakes import InProcessSandbox, tenant_data_dir, test_settings
 
 A = ["run_started", "llm_usage", "plan_ready", "skill_reused", "capability_missing", "forge_started", "llm_usage", "skill_tests_failed",
      "forge_started", "llm_usage", "skill_candidate_ready", "llm_usage", "rule_drafted", "rule_evaluated", "llm_usage", "rule_drafted", "rule_evaluated",
@@ -30,7 +28,7 @@ E = ["run_started", "llm_usage", "plan_ready", "skill_reused", "capability_missi
 def wait_run(client, run_id):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        run = client.app.state.store.get(run_id)
+        run = client.app.state.store.lookup(run_id)
         if run.status != "running":
             return client.get(f"/api/runs/{run_id}/events").json()["events"]
         time.sleep(.01)
@@ -99,10 +97,10 @@ def test_complete_a_b_c_d_real_authority_and_websocket(client):
         assert events[-1]["phase"] == "forge"
         assert events[-1]["data"]["reason_code"] == "FORGE_FAILED"
         assert [ws.receive_json() for _ in events] == events
-        assert not (client.app.state.settings.data_dir / "candidates" / failed).exists()
+        assert not (tenant_data_dir(client.app) / "candidates" / failed).exists()
     assert hashlib.sha256(policy.read_bytes()).hexdigest() == original_policy
-    assert verify_audit(client.app.state.settings.data_dir / "audit.jsonl")[0]
-    index = json.loads((client.app.state.settings.data_dir / "registry" / "registry.json").read_text())
+    assert verify_audit(tenant_data_dir(client.app) / "audit.jsonl")[0]
+    index = json.loads((tenant_data_dir(client.app) / "registry" / "registry.json").read_text())
     assert index["skills"]["distinct_count_window"]["times_used"] == 1
 
 
@@ -113,10 +111,26 @@ def test_reject_discards_and_records_lesson(client):
     events = client.get(f"/api/runs/{run_id}/events").json()["events"]
     assert_sequence(events, A + ["rule_rejected"])
     assert events[-1]["data"]["reason"] == "I will choose a different threshold."
-    data_dir = client.app.state.settings.data_dir
+    data_dir = tenant_data_dir(client.app)
     assert not (data_dir / "candidates" / run_id).exists()
     assert all(s["name"] != "distinct_count_window" for s in client.get("/api/skills").json()["skills"])
     assert json.loads((data_dir / "lessons.jsonl").read_text())["run_id"] == run_id
+
+
+def test_every_sandbox_execution_is_audited_with_tool_versions(client):
+    run_id, events = start(client, "I want to detect directory scanning on a web server.")
+    assert_sequence(events, E)
+    data_dir = tenant_data_dir(client.app)
+    executions = [json.loads(line) for line in (data_dir / "audit.jsonl").read_text().splitlines()]
+    executions = [record for record in executions if record["kind"] == "sandbox_execution"]
+    assert executions and all(record["run_id"] == run_id for record in executions)
+    assert {record["detail"]["mode"] for record in executions} == {"run", "test"}
+    tools = {(record["detail"]["tool"] or {}).get("name") for record in executions}
+    # The forged parser is audited as a candidate, the seed aggregation as installed.
+    assert {"nginx_access_parser", "count_window"} <= tools
+    for record in executions:
+        assert len(record["detail"]["code_sha256"]) == len(record["detail"]["input_sha256"]) == 64
+    assert verify_audit(data_dir / "audit.jsonl")[0]
 
 
 def test_out_of_scope_f(client):
@@ -136,7 +150,7 @@ def test_web_parser_is_forged_and_verified(client):
 
 
 def test_restart_preserves_registry_and_quarantines_modified_artifact(tmp_path):
-    settings = replace(Settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
+    settings = replace(test_settings(), llm_provider="mock", mock_delay_ms=0, data_dir=tmp_path / "data")
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as first:
         run_id, events = start(first, "spray")
         assert first.post(f"/api/runs/{run_id}/approve", json={}).status_code == 200
@@ -148,8 +162,8 @@ def test_restart_preserves_registry_and_quarantines_modified_artifact(tmp_path):
         assert summary_stats(events)["skills_built"] == 0
         assert len([e for e in events if e["type"] == "rule_drafted"]) == 1
         assert second.post(f"/api/runs/{current}/approve", json={}).status_code == 200
-    artifact = settings.data_dir / "registry" / "distinct_count_window" / "skill.py"
+    artifact = tenant_data_dir(settings) / "registry" / "distinct_count_window" / "skill.py"
     artifact.write_text(artifact.read_text() + "\n# changed\n")
     with TestClient(create_app(settings=settings, sandbox=InProcessSandbox())) as third:
         assert all(s["name"] != "distinct_count_window" for s in third.get("/api/skills").json()["skills"])
-        assert list((settings.data_dir / "quarantine").glob("distinct_count_window__*"))
+        assert list((tenant_data_dir(settings) / "quarantine").glob("distinct_count_window__*"))

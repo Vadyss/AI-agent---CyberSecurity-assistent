@@ -8,24 +8,101 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Install sandbox test dependencies
-        run: pip install -r ../sandbox/requirements.txt
-      - run: python -m pytest
-      - name: Relay tests (offline)
+      - name: Install linters
+        run: pip install ruff==0.17.0 mypy==2.4.0 types-PyYAML==6.0.12.20260906 types-requests==2.33.0.20261006
+      - name: Ruff (pyflakes, bugbear, syntax)
+        run: ruff check backend sandbox apify scripts
+      - name: Install backend dependencies for type checking
+        run: pip install -r backend/requirements.txt
+      - name: Mypy (platform modules, see backend/mypy.ini)
+        working-directory: backend
+        run: mypy
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan of the full history (gitleaks)
+        run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --log-opts="--all" --redact --exit-code 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python dependency audit (pip-audit)
         run: |
-          pip install -r ../apify/llm-relay/requirements.txt -r ../apify/llm-relay/requirements-dev.txt
-          python -m pytest ../apify/llm-relay/tests
+          pip install pip-audit==2.10.1
+          pip-audit -r backend/requirements.lock --require-hashes --disable-pip --progress-spinner off
+          pip-audit -r sandbox/requirements.lock --require-hashes --disable-pip --progress-spinner off
+          pip-audit -r apify/llm-relay/requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend production dependency audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Frontend development dependency audit (informational)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build --build-arg APP_VERSION=${{ github.sha }} -t toolsmith-backend:ci backend
+          docker build -t toolsmith-sandbox:ci sandbox
+          docker build -t toolsmith-frontend:ci frontend
+      - name: Container vulnerability scan (trivy, fixable HIGH and CRITICAL fail the build)
+        run: |
+          for image in toolsmith-backend:ci toolsmith-sandbox:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image \
+              --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
+      # Informational until the frontend Dockerfile adopts Docs/FRONTEND_CHANGES.md (F-11).
+      - name: Container vulnerability scan of the frontend image (informational)
+        continue-on-error: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image \
+            --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 toolsmith-frontend:ci
+      - name: Software bill of materials (CycloneDX)
+        run: |
+          mkdir -p sbom
+          for name in backend sandbox frontend; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/sbom":/out aquasec/trivy:0.75.0 image \
+              --quiet --format cyclonedx --output "/out/$name.cdx.json" "toolsmith-$name:ci"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same image and user (root) as local runs, so sandbox UID-isolation
+      # tests execute instead of being skipped on the unprivileged runner.
+      - name: Backend and sandbox tests (python:3.12-slim)
+        run: sh backend/scripts/test.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Relay tests (offline)
+        working-directory: apify/llm-relay
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          python -m pytest tests
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -45,6 +122,9 @@ jobs:
   integration:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      # Throwaway database of the isolated CI stack; never a deployment secret.
+      POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,6 +146,13 @@ jobs:
           python backend/scripts/smoke_e2e.py --base http://localhost:13000 --idle-before-run 180
       - name: Isolated sandbox security checks
         run: |
+          sandbox=$(docker compose -p frankenstein-ci -f docker-compose.yml -f docker-compose.demo.yml ps -q sandbox)
+          if [ "$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$sandbox")" != none ]; then
+            echo "FAIL: test sandbox has a network"; exit 1
+          fi
+          if [ "$(docker exec "$sandbox" sh -c 'grep CapEff /proc/1/status | cut -f2')" != 00000000000000e0 ]; then
+            echo "FAIL: test sandbox capabilities are not exactly SETUID, SETGID and KILL"; exit 1
+          fi
           if docker compose -p frankenstein-ci -f docker-compose.yml -f docker-compose.demo.yml exec -T sandbox printenv APIFY_TOKEN > /dev/null; then
             echo "FAIL: test sandbox has API key"; exit 1
           fi
@@ -84,8 +171,29 @@ jobs:
           docker rm -f frankenstein-ci-proxy || true
           docker compose -p frankenstein-ci -f docker-compose.yml -f docker-compose.demo.yml down
 
+  auth-integration:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install smoke client
+        run: pip install httpx==0.28.1 websockets==15.0.1
+      - name: Start the development stack with oauth2-proxy and the mock provider
+        run: sh scripts/dev-up.sh .ci.env
+      - name: Sign-in chain, API keys, tenant refusal and WebSocket origin checks
+        run: python scripts/auth_smoke.py
+      - name: Diagnostics
+        if: failure()
+        run: docker compose --env-file .ci.env -p toolsmith-dev -f docker-compose.yml -f docker-compose.dev.yml logs --tail 200
+      - name: Remove the stack
+        if: always()
+        run: docker compose --env-file .ci.env -p toolsmith-dev -f docker-compose.yml -f docker-compose.dev.yml down -v
+
   deploy:
-    needs: [test, frontend-test, integration]
+    needs: [lint, security, test, images, frontend-test, integration, auth-integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, ARM64]
     steps:
@@ -96,18 +204,34 @@ jobs:
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          NEXT_PUBLIC_API_BASE: ${{ vars.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000' }}
-          CORS_ORIGINS: ${{ vars.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000' }}
-          BACKEND_BIND_HOST: ${{ vars.BACKEND_BIND_HOST || '127.0.0.1' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          OAUTH2_PROXY_COOKIE_SECRET: ${{ secrets.OAUTH2_PROXY_COOKIE_SECRET }}
+          OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+          OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_ADMIN_EMAIL }}
 
       - name: Backend health check
-        run: curl --fail --retry 10 --retry-delay 3 --retry-all-errors http://127.0.0.1:8000/health
+        run: |
+          for attempt in $(seq 10); do
+            docker compose exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" && exit 0
+            sleep 3
+          done
+          exit 1
 
-      - name: Frontend health check
-        run: curl --fail --retry 10 --retry-delay 3 --retry-all-errors http://localhost:3000
+      - name: Public entry (oauth2-proxy) health check
+        run: curl --fail --retry 10 --retry-delay 3 --retry-all-errors http://127.0.0.1:4180/ping
 
       - name: Sandbox security checks
         run: |
+          if [ "$(docker inspect -f '{{.HostConfig.NetworkMode}}' hackathon-sandbox-1)" != none ]; then
+            echo "FAIL: sandbox has a network"; exit 1
+          fi
+          if [ "$(docker exec hackathon-sandbox-1 sh -c 'grep CapEff /proc/1/status | cut -f2')" != 00000000000000e0 ]; then
+            echo "FAIL: sandbox capabilities are not exactly SETUID, SETGID and KILL"; exit 1
+          fi
           if docker exec hackathon-sandbox-1 printenv APIFY_TOKEN > /dev/null; then
             echo "FAIL: sandbox has API key"; exit 1
           fi

@@ -40,6 +40,7 @@ EVENT_CASES = [
     ("policy_rejected", {"target": "recipe", "name": "ssh_bruteforce", "violations": [{"code": "RECIPE_EXCEPTION"}]},
      "The gatekeeper rejected recipe ssh_bruteforce: RECIPE_EXCEPTION."),
     ("run_failed", {"reason_code": "LLM_ERROR"}, "Run failed (LLM_ERROR)."),
+    ("run_cancelled", {"reason": "Cancelled on request."}, "The run was cancelled."),
 ]
 
 

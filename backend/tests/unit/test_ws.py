@@ -14,7 +14,7 @@ def test_websocket_replay_consistency_and_no_history(tmp_path):
     with TestClient(app) as client:
         first = client.post("/api/runs", json={"request": "old"}).json()["run_id"]
         async def finish():
-            run = app.state.store.get(first)
+            run = app.state.store.lookup(first)
             await app.state.emitter.emit(run, "run_failed", "plan", {"reason_code": "REQUEST_REJECTED", "reason": "Ne."})
         client.portal.call(finish)
         with client.websocket_connect("/api/ws") as ws:
@@ -40,13 +40,13 @@ async def test_slow_subscriber_does_not_block_fast_client():
             self.closed = True
     hub = WebSocketHub(queue_size=1, send_timeout_s=.03)
     slow, fast = Socket(True), Socket()
-    slow_client = await hub.connect(slow)
-    await hub.connect(fast)
-    hub.broadcast({"seq": 1})
+    slow_client = await hub.connect(slow, "t")
+    await hub.connect(fast, "t")
+    hub.broadcast({"seq": 1}, "t")
     await asyncio.sleep(.01)
-    hub.broadcast({"seq": 2})
+    hub.broadcast({"seq": 2}, "t")
     await asyncio.sleep(.01)
-    hub.broadcast({"seq": 3})
+    hub.broadcast({"seq": 3}, "t")
     await asyncio.sleep(.05)
     assert slow_client not in hub.clients
     assert slow.closed

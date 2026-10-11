@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 from datetime import datetime, timezone
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from decimal import Decimal
 from functools import lru_cache, wraps
 from html import escape
 from pathlib import Path
@@ -54,6 +56,19 @@ class LlmBudgetExceeded(LlmError):
     pass
 
 
+class TenantBudgetExceeded(LlmBudgetExceeded):
+    """The tenant's monthly model budget is used up."""
+
+
+@dataclass
+class TenantBudget:
+    remaining_usd: Decimal
+
+
+# Bound per run by the dispatcher; None outside runs (scripts, tests).
+TenantSpend: ContextVar[TenantBudget | None] = ContextVar("tenant_budget", default=None)
+
+
 @dataclass(frozen=True)
 class LlmResult:
     text: str
@@ -79,6 +94,9 @@ def reset_run_counters(token: RunBinding) -> None:
 
 
 def count_call(max_calls: int) -> None:
+    budget = TenantSpend.get()
+    if budget is not None and budget.remaining_usd <= 0:
+        raise TenantBudgetExceeded("The tenant's monthly model budget is used up.")
     counters = LlmBudget.get()
     if counters is not None:
         if counters.llm_calls >= max_calls:
@@ -93,6 +111,9 @@ def count_tokens(tokens: int | None) -> None:
 
 
 def count_cost(cost) -> None:
+    budget = TenantSpend.get()
+    if budget is not None and cost is not None:
+        budget.remaining_usd -= cost
     counters = LlmBudget.get()
     if counters is None:
         return
@@ -100,6 +121,20 @@ def count_cost(cost) -> None:
         counters.cost_unknown = True
     else:
         counters.cost_usd = (money(getattr(counters, "cost_usd", None)) or money(0)) + cost
+
+
+def prompt_version(role: str, system: str) -> str | None:
+    """Content-addressed prompt version: any edit to a prompt yields a new version."""
+    if not system or not role.replace("_", "").isalpha():
+        return None
+    return f"{role.lower()}@{hashlib.sha256(system.encode('utf-8')).hexdigest()[:12]}"
+
+
+def prompt_versions() -> dict[str, str]:
+    """Versions of every shipped role prompt, for diagnostics and evaluation reports."""
+    folder = Path(__file__).resolve().parent / "prompts"
+    return {path.stem: prompt_version(path.stem, path.read_text(encoding="utf-8"))
+            for path in sorted(folder.glob("*.md"))}
 
 
 def _capture_usage(ledger, role, model, system, user, response, started, attempt, context=None, *, mock_text=None, pricing_allowed=True):
@@ -143,7 +178,8 @@ def _capture_usage(ledger, role, model, system, user, response, started, attempt
                   duration_ms=max(0, int((time.monotonic() - started) * 1000)),
                   timestamp=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                   retry=attempt > 1 or iteration > 1 or bool(context.get("repair")),
-                  status="success" if succeeded else "error", warning=warning)
+                  status="success" if succeeded else "error", warning=warning,
+                  prompt_version=prompt_version(role, system))
     if warning:
         logger.warning("LLM usage run_id=%s step=%s model=%s: %s", ledger.run_id, role, model, warning)
     return ledger.append(record)
@@ -441,29 +477,41 @@ def prompt_for(role: str) -> str:
 
 
 async def json_chat(client: LlmClient, role: str, system: str, user: str, context: dict) -> dict | ParseFailure:
+    """One call, plus at most one repair when the output is not JSON or has the wrong shape."""
+    from .schemas import shape_problems
+
     result = await client.chat(role, system, user, context=context)
     if isinstance(result, ParseFailure):
         return result
     parsed = extract_json(result.text)
+    run_id = (LlmProviderState.get() or ProviderState()).run_id
     if isinstance(parsed, ParseFailure):
-        logger.info("LLM json_parse_failed run_id=%s role=%s stage=initial",
-                    (LlmProviderState.get() or ProviderState()).run_id, role)
-        repair = dict(context, repair=True)
-        repaired = await client.chat(role, system,
-                                     user + "\n" + untrusted("invalid_output", result.text[:20000])
-                                     + "\nReturn only valid JSON matching the required schema, with no additional text.", context=repair)
-        parsed = repaired if isinstance(repaired, ParseFailure) else extract_json(repaired.text)
-        if isinstance(parsed, ParseFailure):
-            logger.info("LLM json_parse_failed run_id=%s role=%s stage=repair",
-                        (LlmProviderState.get() or ProviderState()).run_id, role)
+        logger.info("LLM json_parse_failed run_id=%s role=%s stage=initial", run_id, role)
+        feedback = untrusted("invalid_output", result.text[:20000])
+    else:
+        problems = shape_problems(role, parsed)
+        if not problems:
+            return parsed
+        logger.info("LLM schema_failed run_id=%s role=%s stage=initial problems=%d", run_id, role, len(problems))
+        feedback = untrusted("schema_errors", problems)
+    repair = dict(context, repair=True)
+    repaired = await client.chat(role, system, user + "\n" + feedback
+                                 + "\nReturn only valid JSON matching the required schema, with no additional text.",
+                                 context=repair)
+    parsed = repaired if isinstance(repaired, ParseFailure) else extract_json(repaired.text)
+    if isinstance(parsed, ParseFailure):
+        logger.info("LLM json_parse_failed run_id=%s role=%s stage=repair", run_id, role)
         return parsed
+    if shape_problems(role, parsed):
+        logger.info("LLM schema_failed run_id=%s role=%s stage=repair", run_id, role)
+        return ParseFailure("The output does not match the required schema.")
     return parsed
 
 
 def ask(prompt: str, system: str | None = None, model: str | None = None) -> str | ParseFailure:
     """Original synchronous requests API retained for IDE scripts."""
     from orchestrator.config import Settings
-    settings = Settings.from_env(load_env_file=True)
+    settings = Settings.from_env(load_env_file=True, llm_only=True)
     if settings.llm_provider == "mock":
         raise LlmError("Synchronous ask requires a live provider; the mock uses async chat.")
     key = (settings.apify_token or settings.llm_api_key) if settings.llm_provider == "apify" else settings.llm_api_key

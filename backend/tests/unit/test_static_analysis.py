@@ -16,6 +16,12 @@ HARMFUL = [
 ('def run(inputs, params):\n    return ().__class__.__bases__[0].__subclasses__()', 'FORBIDDEN_ATTRIBUTE'),
 ('def run(inputs, params):\n    return inputs.__dict__', 'FORBIDDEN_ATTRIBUTE'),
 ('def run(inputs, params):\n    return __builtins__', 'FORBIDDEN_ATTRIBUTE'),
+*[(f'def run(inputs, params):\n    item = (x for x in inputs)\n    return [item.{attr}]', 'FORBIDDEN_ATTRIBUTE') for attr in ['gi_frame', 'gi_code', 'f_back', 'f_globals', 'f_locals', 'tb_frame', 'co_code', 'func_globals']],
+("def run(inputs, params):\n    return ['{0.real}'.format(1)]", 'FORBIDDEN_CALL'),
+("def run(inputs, params):\n    return ['{0[0]}'.format(inputs)]", 'FORBIDDEN_CALL'),
+("def run(inputs, params):\n    return ['{:{0.real}}'.format(1)]", 'FORBIDDEN_CALL'),
+("def run(inputs, params):\n    template = params['t']\n    return [template.format(1)]", 'FORBIDDEN_CALL'),
+("def run(inputs, params):\n    return ['{x}'.format_map({'x': 1})]", 'FORBIDDEN_ATTRIBUTE'),
 ('def run(inputs, params):\n    global state\n    return []', 'FORBIDDEN_SYNTAX'),
 ('async def run(inputs, params):\n    return []', 'FORBIDDEN_SYNTAX'),
 ('def run(inputs, params):\n    yield 1', 'FORBIDDEN_SYNTAX'),
@@ -40,7 +46,7 @@ HARMFUL = [
 def test_harmful(source, code, gk_policy):
     assert code in {v.code for v in analyze_code(source, {'imports': ['re']}, gk_policy)}
 
-@pytest.mark.parametrize('source', [BASE, 'import re\nP = re.compile("abc")\n' + BASE, 'from collections import defaultdict\n' + BASE, 'VALUES = frozenset((1, 2))\n' + BASE, 'class Helper:\n    def __init__(self):\n        self.value = 0\n' + BASE, 'def run(inputs, params):\n    return [{"_line": i} for i, value in enumerate(inputs)]'])
+@pytest.mark.parametrize('source', [BASE, 'import re\nP = re.compile("abc")\n' + BASE, 'from collections import defaultdict\n' + BASE, 'VALUES = frozenset((1, 2))\n' + BASE, 'class Helper:\n    def __init__(self):\n        self.value = 0\n' + BASE, 'def run(inputs, params):\n    return [{"_line": i} for i, value in enumerate(inputs)]', 'def run(inputs, params):\n    return ["{}:{:>5}:{name}".format(1, 2, name=3)]', 'def run(inputs, params):\n    return [f"{len(inputs)}"]'])
 def test_legitimate(source, gk_policy):
     assert not analyze_code(source, {'imports': ['re', 'collections']}, gk_policy)
 

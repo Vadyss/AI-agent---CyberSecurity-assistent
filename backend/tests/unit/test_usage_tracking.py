@@ -79,11 +79,14 @@ def test_unknown_cost_is_not_zero_or_a_complete_subtotal(tmp_path):
     assert all(s["share_percent"] is None for s in result["totals"]["steps"])
 
 
+FORGE_ANSWER = '{"manifest": {}, "code": "", "tests": ""}'
+
+
 async def test_every_attempt_emits_usage_even_on_retry_parse_repair_and_length(tmp_path, caplog):
     responses = [httpx.Response(503), httpx.Response(200, json={"choices": [{"message": {"content": None}, "finish_reason": "length"}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "cost": .001}}),
         httpx.Response(200, json={"choices": [{"message": {"content": "not json"}}], "usage": {"total_tokens": 40, "cost": .002}}),
-        httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}], "usage": {"total_tokens": 50, "cost": .003}})]
+        httpx.Response(200, json={"choices": [{"message": {"content": FORGE_ANSWER}}], "usage": {"total_tokens": 50, "cost": .003}})]
     emitted = []
     async def publish(data): emitted.append(data)
     async def sleep(_): pass
@@ -93,7 +96,7 @@ async def test_every_attempt_emits_usage_even_on_retry_parse_repair_and_length(t
     client = HttpLlmClient(Settings(llm_api_key="secret-token", llm_provider="openai_compatible"),
         transport=httpx.MockTransport(lambda _: responses.pop(0)), sleep=sleep)
     try:
-        assert await json_chat(client, "forge", "secret-system", "secret-prompt", {"attempt": 2}) == {}
+        assert await json_chat(client, "forge", "secret-system", "secret-prompt", {"attempt": 2}) == json.loads(FORGE_ANSWER)
     finally:
         await client.close(); reset_run_counters(binding)
     assert len(emitted) == 4 and counters.llm_calls == 4

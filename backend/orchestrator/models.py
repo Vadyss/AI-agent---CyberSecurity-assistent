@@ -7,13 +7,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationInfo, field_validator
 
-from gatekeeper.types import Metrics, SkillInfo, Thresholds, Violation
+from gatekeeper.types import Metrics, SkillInfo, Violation
 from orchestrator.text import clip
 
 Phase = Literal["intake", "plan", "forge", "rule", "validation", "approval", "done"]
-Status = Literal["running", "awaiting_approval", "approved", "rejected", "failed"]
+Status = Literal["queued", "running", "awaiting_approval", "approved", "rejected", "failed", "cancelled"]
 ReasonCode = Literal["REQUEST_REJECTED", "PLAN_INVALID", "FORGE_FAILED", "RULE_FAILED",
-                     "VALIDATION_FAILED", "LLM_ERROR", "SANDBOX_ERROR", "INTERNAL_ERROR"]
+                     "VALIDATION_FAILED", "LLM_ERROR", "SANDBOX_ERROR", "INTERNAL_ERROR", "QUOTA_EXCEEDED"]
 Name = str
 
 
@@ -41,6 +41,10 @@ class RunInfo(ContractModel):
     created_at: str
     finished_at: str | None
     last_seq: int = Field(ge=0)
+    # Contract v1 additions (optional for older clients).
+    attempt: int = Field(default=1, ge=1)
+    retry_of: str | None = None
+    created_by: str | None = None
 
 
 class RunStats(ContractModel):
@@ -186,6 +190,10 @@ class RunFailedData(ContractModel):
     reason: str
 
 
+class RunCancelledData(ContractModel):
+    reason: str
+
+
 class UsageRecordData(ContractModel):
     run_id: str = Field(pattern=r"^run_[a-z0-9]{4,32}$")
     call_id: int = Field(ge=1)
@@ -207,6 +215,8 @@ class UsageRecordData(ContractModel):
     retry: bool
     status: Literal["success", "error"]
     warning: str | None
+    # role@<first 12 hex of SHA-256 of the system prompt>; changes with every prompt edit.
+    prompt_version: str | None = Field(default=None, pattern=r"^[a-z_]+@[0-9a-f]{12}$")
 
 
 class UsageStepData(ContractModel):
@@ -256,6 +266,7 @@ DATA_MODELS = {
     "awaiting_approval": AwaitingApprovalData, "skill_installed": SkillInstalledData,
     "rule_approved": RuleApprovedData, "rule_rejected": RuleRejectedData,
     "policy_rejected": PolicyRejectedData, "run_failed": RunFailedData,
+    "run_cancelled": RunCancelledData,
 }
 
 
@@ -264,7 +275,7 @@ class EventEnvelope(ContractModel):
                   "forge_started", "skill_tests_failed", "skill_candidate_ready",
                   "rule_drafted", "rule_evaluated", "validation_done", "summary",
                   "voice_ready", "awaiting_approval", "skill_installed", "rule_approved",
-                  "rule_rejected", "policy_rejected", "run_failed", "llm_usage"]
+                  "rule_rejected", "policy_rejected", "run_failed", "run_cancelled", "llm_usage"]
     run_id: str = Field(pattern=r"^run_[a-z0-9]{4,32}$")
     seq: int = Field(ge=1)
     timestamp: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")

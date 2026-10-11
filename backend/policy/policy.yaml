@@ -16,6 +16,8 @@ skills:
   allowed_imports: [re, datetime, collections, itertools, functools, math, statistics, ipaddress, json, typing, dataclasses, bisect, heapq, string, operator, enum, decimal, fractions, hashlib, base64, binascii]
   forbidden_calls: [eval, exec, compile, open, __import__, input, breakpoint, globals, locals, vars, getattr, setattr, delattr, dir, help, exit, quit, memoryview, print]
   forbid_dunder_access: true
+  # Runtime introspection of frames, code objects, generators and tracebacks.
+  forbidden_attributes: [gi_frame, gi_code, gi_yieldfrom, cr_frame, cr_code, cr_await, ag_frame, ag_code, ag_await, f_back, f_globals, f_locals, f_builtins, f_code, f_trace, tb_frame, tb_next, co_code, co_consts, co_names, func_globals, func_code, format_map]
   permissions: {network: deny, filesystem: deny, subprocess: deny}
   network_allowed_domains: []
   forbidden_param_patterns: [exclude, ignore, whitelist, allowlist, skip, bypass]

@@ -269,6 +269,38 @@ class Registry:
                 raise IntegrityError("The candidate belongs to another run.")
             return self._read_verified(folder, meta, run_id, name)
 
+    def review(self, run_id: str | None, name: str) -> dict:
+        """Code, tests and manifest of an installed skill or a run's candidate, integrity-checked."""
+        code, manifest, meta = self.read_skill(run_id, name)
+        with self.lock:
+            folder = self._folder(name) if name in self.index["skills"] else self._candidate_path(run_id, name)
+            tests = safe_join(folder, "test_skill.py").read_bytes()
+        if sha256(tests) != meta["tests_sha256"]:
+            self._integrity(run_id, name, "The tests changed after they were verified.")
+            raise IntegrityError("Skill integrity has been compromised.")
+        return {"name": name, "version": meta["version"], "kind": meta["kind"], "origin": meta["origin"],
+                "manifest": manifest, "code": code, "tests": tests.decode("utf-8"),
+                "code_sha256": meta["sha256"], "tests_sha256": meta["tests_sha256"],
+                "created_by_run": meta["created_by_run"], "created_at": meta["created_at"]}
+
+    def describe_digest(self, code_sha256: str) -> dict | None:
+        """Name and version of the installed skill or candidate with this code digest."""
+        with self.lock:
+            for name, meta in sorted(self.index["skills"].items()):
+                if meta.get("sha256") == code_sha256:
+                    return {"name": name, "version": meta["version"], "origin": meta["origin"], "status": "installed"}
+            for meta_path in sorted(self.candidates_dir.glob("run_*/*/meta.json")):
+                if meta_path.is_symlink():
+                    continue
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(meta, dict) and meta.get("sha256") == code_sha256:
+                    return {"name": meta_path.parent.name, "version": meta.get("version"),
+                            "origin": "agent", "status": "candidate"}
+        return None
+
     def manifests(self, run_id: str | None = None) -> list[dict]:
         with self.lock:
             names = sorted(self.index["skills"])
@@ -350,7 +382,7 @@ class Registry:
                 raise IntegrityError("The run already has an approved rule.")
             installed = []
             try:
-                for name, (_, manifest, meta) in artifacts.items():
+                for name, (_, _, meta) in artifacts.items():
                     folder = self._candidate_path(run_id, name)
                     stage = self.registry_dir / f".tmp-{name}-{uuid.uuid4().hex}"
                     stage.mkdir()
@@ -411,6 +443,27 @@ class Registry:
         with self.lock:
             folder = self._candidate_path(run_id)
             if folder.exists(): shutil.rmtree(folder)
+
+
+def erase_tenant_data(data_dir: Path) -> None:
+    """Delete everything a tenant has on disk: tools, candidates, rules, lessons, usage and audit."""
+    root = Path(data_dir)
+    if root.is_symlink():
+        raise IntegrityError("A tenant data directory must not be a symbolic link.")
+    if root.exists():
+        shutil.rmtree(root)
+
+
+def remove_run_files(data_dir: Path, run_ids: list[str]) -> int:
+    """Delete per-run files (usage records) of runs removed by the retention policy."""
+    removed = 0
+    runs = Path(data_dir) / "runs"
+    for run_id in run_ids:
+        folder = safe_join(runs, require_run_id(run_id))
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder)
+            removed += 1
+    return removed
 
 
 class UsageStore:

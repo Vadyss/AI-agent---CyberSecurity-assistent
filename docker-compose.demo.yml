@@ -1,8 +1,24 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 # Use a separate project when another stack already owns port 3000.
+# Demo mode: development environment, mock model, authentication disabled
+# (one local tenant). Never expose this overlay beyond localhost.
 services:
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://127.0.0.1:8000}
+    ports:
+      - "3000:8080"
+  oauth2-proxy:
+    # The demo has no sign-in; oauth2-proxy is not started.
+    profiles: ["never"]
   backend:
+    ports:
+      - "${BACKEND_BIND_HOST:-127.0.0.1}:8000:8000"
     environment:
+      ENVIRONMENT: development
+      AUTH_MODE: disabled
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
       LLM_PROVIDER: mock
       MOCK_DELAY_MS: "600"
       APIFY_TOKEN: ""
@@ -11,6 +27,10 @@ services:
       ELEVENLABS_VOICE_ID: ""
     volumes:
       - frankenstein-data-demo:/data
+  postgres:
+    volumes:
+      - postgres-data-demo:/var/lib/postgresql
 
 volumes:
   frankenstein-data-demo: {}
+  postgres-data-demo: {}

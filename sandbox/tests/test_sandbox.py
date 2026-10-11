@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
@@ -139,7 +142,7 @@ def run(inputs, params):
     ("def run(inputs, params):\n    raise ValueError('x')", 2, "error"),
     ("def run(inputs, params):\n    while True:\n        pass", 0.15, "timeout"),
 ])
-def test_clean_child_environment_limits_and_workdir_cleanup(monkeypatch, code, timeout, status):
+def test_clean_child_environment_and_pipe_transport(monkeypatch, code, timeout, status):
     monkeypatch.setenv("APIFY_TOKEN", "test-secret-that-must-not-pass")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "another-secret")
     original_popen = subprocess.Popen
@@ -155,11 +158,14 @@ def test_clean_child_environment_limits_and_workdir_cleanup(monkeypatch, code, t
     spawn = observed[0]
     assert spawn["env"] == {"PATH": os.defpath}
     assert spawn["start_new_session"] is True
-    assert callable(spawn["preexec_fn"])
-    assert not Path(spawn["cwd"]).exists()
+    # preexec_fn is unsafe in a threaded server; limits are applied by the runner.
+    assert "preexec_fn" not in spawn
+    # Jobs travel through pipes, so no job file is ever written to disk.
+    assert spawn["cwd"] == "/"
+    assert spawn["stdin"] == subprocess.PIPE and spawn["stdout"] == subprocess.PIPE
 
 
-def test_no_more_than_two_real_children_at_a_time(monkeypatch):
+def _track_children(monkeypatch):
     original_popen = subprocess.Popen
     lock = threading.Lock()
     counts = {"active": 0, "peak": 0}
@@ -167,11 +173,13 @@ def test_no_more_than_two_real_children_at_a_time(monkeypatch):
     class TrackedProcess:
         def __init__(self, *args, **kwargs):
             self.process = original_popen(*args, **kwargs)
-            self.pid = self.process.pid
             self.done = False
             with lock:
                 counts["active"] += 1
                 counts["peak"] = max(counts["peak"], counts["active"])
+
+        def __getattr__(self, name):
+            return getattr(self.process, name)
 
         def wait(self, *args, **kwargs):
             result = self.process.wait(*args, **kwargs)
@@ -182,24 +190,85 @@ def test_no_more_than_two_real_children_at_a_time(monkeypatch):
             return result
 
     monkeypatch.setattr(server.subprocess, "Popen", TrackedProcess)
-    value = job("def run(inputs, params):\n    while True:\n        pass", timeout_s=0.2)
+    return counts
+
+
+LOOP = "def run(inputs, params):\n    while True:\n        pass"
+
+
+def test_no_more_than_two_real_children_at_a_time(monkeypatch):
+    counts = _track_children(monkeypatch)
+    jobs = [job(LOOP, timeout_s=0.2, tenant_id=f"tenant-{n}") for n in range(4)]
     with ThreadPoolExecutor(max_workers=4) as pool:
-        answers = list(pool.map(server.execute_job_sync, [value] * 4))
+        answers = list(pool.map(server.execute_job_sync, jobs))
     assert [answer["status"] for answer in answers] == ["timeout"] * 4
     assert counts == {"active": 0, "peak": 2}
 
 
+def test_one_tenant_cannot_occupy_every_slot(monkeypatch):
+    counts = _track_children(monkeypatch)
+    jobs = [job(LOOP, timeout_s=0.2, tenant_id="noisy")] * 3
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        answers = list(pool.map(server.execute_job_sync, jobs))
+    assert [answer["status"] for answer in answers] == ["timeout"] * 3
+    assert counts == {"active": 0, "peak": 1}
+
+
+@pytest.mark.parametrize("tenant", ["", "../x", "a" * 65, 7, "tenant id"])
+def test_invalid_tenant_is_rejected(tenant):
+    assert server.execute_job_sync(job(tenant_id=tenant))["status"] == "rejected"
+
+
+@pytest.mark.parametrize("env", [{"SANDBOX_ISOLATION": "chroot"}, {"SANDBOX_UID_BASE": "0"},
+                                 {"SANDBOX_MAX_JOBS": "0"}, {"SANDBOX_MAX_JOBS_PER_TENANT": "3"}])
+def test_invalid_sandbox_configuration_fails_closed(monkeypatch, env):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError):
+        server.SandboxConfig.from_env()
+
+
+def test_uid_isolation_refuses_to_start_without_root(monkeypatch):
+    monkeypatch.setattr(server, "CONFIG", server.SandboxConfig(isolation="uid"))
+    monkeypatch.setattr(server.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit):
+        server.preflight()
+
+
 def test_real_resource_limits_in_child(monkeypatch, tmp_path):
-    # A trusted probe replaces the runner solely in this test, then is subject
-    # to exactly the same server subprocess limits as submitted code.
+    # A trusted probe replaces the runner solely in this test. It applies the
+    # runner's own limit function with the arguments the server passes, then
+    # reports what the kernel actually enforces in the child.
+    runner_dir = Path(server.RUNNER_PATH).parent
     probe = tmp_path / "probe.py"
-    probe.write_text("""import json, pathlib, resource, sys
-limits = [resource.getrlimit(k)[0] for k in [resource.RLIMIT_CPU, resource.RLIMIT_AS, resource.RLIMIT_FSIZE, resource.RLIMIT_NOFILE, resource.RLIMIT_CORE]]
-result = dict(status='ok', result=limits, tests=dict(total=0, failed=0, failures=[]), error=None, duration_ms=0)
-pathlib.Path(sys.argv[1], 'result.json').write_text(json.dumps(result))
+    probe.write_text(f"""import json, os, resource, sys
+sys.path.insert(0, {str(runner_dir)!r})
+import runner
+runner.apply_limits(int(sys.argv[1]), sys.argv[2] == "1")
+kinds = [resource.RLIMIT_CPU, resource.RLIMIT_AS, resource.RLIMIT_FSIZE, resource.RLIMIT_NOFILE, resource.RLIMIT_CORE]
+result = dict(status='ok', result=[resource.getrlimit(k)[0] for k in kinds],
+              tests=dict(total=0, failed=0, failures=[]), error=None, duration_ms=0)
+os.read(0, 10_000_000)
+os.write(1, json.dumps(result).encode())
 """)
     monkeypatch.setattr(server, "RUNNER_PATH", probe)
-    assert server.execute_job_sync(job(timeout_s=2))["result"] == [3, 256 * 1024 * 1024, 10_000_000, 64, 0]
+    assert server.execute_job_sync(job(timeout_s=2))["result"] == [3, 256 * 1024 * 1024, 0, 64, 0]
+
+
+def test_skill_output_cannot_corrupt_result_pipe():
+    # print() is discarded in-process; the runner also points fds 1 and 2 at
+    # /dev/null, so even raw writes to stdout cannot reach the result pipe.
+    code = "def run(inputs, params):\n    print('{\"status\": \"ok\"}' * 100)\n    return [1]\n"
+    result = execute(code)
+    assert result["status"] == "ok", result
+    assert result["result"] == [1]
+
+
+def test_large_input_is_streamed_without_deadlock():
+    lines = ["x" * 1000] * 4000  # About 4 MB: far larger than a pipe buffer.
+    result = execute("def run(inputs, params):\n    return [len(inputs)]\n", inputs=lines, timeout_s=10)
+    assert result["status"] == "ok", result
+    assert result["result"] == [4000]
 
 
 def test_each_job_has_fresh_module_state():
@@ -231,3 +300,139 @@ def test_bad_json_and_body_limit_return_protocol_200():
             answer = client.post("/execute", content=body)
             assert answer.status_code == 200
             assert answer.json()["status"] == "rejected"
+
+
+needs_root = pytest.mark.skipif(sys.platform != "linux" or os.geteuid() != 0,
+                                reason="UID isolation needs Linux and root, as in the sandbox container.")
+
+
+@pytest.fixture
+def isolated(monkeypatch):
+    config = server.SandboxConfig(isolation="uid", uid_base=23000, max_jobs=2, max_jobs_per_tenant=1)
+    monkeypatch.setattr(server, "CONFIG", config)
+    monkeypatch.setattr(server, "SCHEDULER", server.Scheduler(config.max_jobs, config.max_jobs_per_tenant))
+    server.preflight()
+    return config
+
+
+@pytest.fixture
+def public_probe(monkeypatch):
+    # Job UIDs cannot read pytest's private tmp_path, so probes live in a
+    # world-readable directory for the duration of the test.
+    folder = Path(tempfile.mkdtemp(prefix="probe-", dir="/tmp"))
+    folder.chmod(0o755)
+
+    def install(source: str) -> None:
+        probe = folder / "probe.py"
+        probe.write_text(source)
+        probe.chmod(0o644)
+        monkeypatch.setattr(server, "RUNNER_PATH", probe)
+
+    yield install
+    shutil.rmtree(folder)
+
+
+REPORT = """
+import sys
+sys.path.insert(0, %r)
+import runner
+runner.apply_limits(int(sys.argv[1]), sys.argv[2] == "1")
+
+def report(value):
+    import json, os
+    os.read(0, 10_000_000)
+    os.write(1, json.dumps(dict(status='ok', result=value, tests=dict(total=0, failed=0, failures=[]),
+                                error=None, duration_ms=0)).encode())
+""" % str(Path(server.__file__).resolve().parent)
+
+
+@needs_root
+def test_isolated_job_runs_as_private_uid_without_capabilities(isolated, public_probe):
+    public_probe(REPORT + """
+import os, resource
+status = dict(line.split(':', 1) for line in open('/proc/self/status').read().splitlines() if ':' in line)
+report([os.getuid(), os.geteuid(), os.getgid(), os.getgroups(), status['CapEff'].strip(),
+        status['CapPrm'].strip(), status['NoNewPrivs'].strip() if 'NoNewPrivs' in status else None,
+        resource.getrlimit(resource.RLIMIT_NPROC)[0]])
+""")
+    result = server.execute_job_sync(job())
+    uid = result["result"][0]
+    assert uid in (23000, 23001)
+    assert result["result"][:4] == [uid, uid, uid, []]
+    assert result["result"][4] == result["result"][5] == "0000000000000000"
+    assert result["result"][7] == 16
+
+
+@needs_root
+def test_isolated_job_leaves_no_process_behind(isolated, public_probe):
+    # A probe that escapes its process group stands in for code that broke
+    # out of the Python guards; the UID sweep must still find it.
+    public_probe(REPORT + """
+import os, time
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        time.sleep(60)
+    os._exit(0)
+time.sleep(0.2)
+report([os.getuid()])
+""")
+    started = time.monotonic()
+    result = server.execute_job_sync(job(timeout_s=5))
+    assert result["status"] == "ok", result
+    # The orphan keeps the result pipe open; the server must not wait for it.
+    assert time.monotonic() - started < 2
+    assert server._processes_of(result["result"][0]) == []
+
+
+@needs_root
+def test_real_skill_runs_under_isolation(isolated):
+    code = "import re\ndef run(inputs, params):\n    return [bool(re.match('a', x)) for x in inputs]\n"
+    result = execute(code, inputs=["abc", "xyz"], allowed_imports=["re"])
+    assert result["status"] == "ok", result
+    assert result["result"] == [True, False]
+
+
+@needs_root
+def test_isolated_job_cannot_write_files(isolated, public_probe):
+    public_probe(REPORT + """
+import os
+outcome = []
+for path in ('/tmp/leak', '/dev/shm/leak', '/proc/self/cwd/leak'):
+    try:
+        with open(path, 'w') as handle:
+            handle.write('x')
+        outcome.append('written')
+    except (OSError, IOError) as error:
+        outcome.append(type(error).__name__)
+report(outcome)
+""")
+    result = server.execute_job_sync(job())
+    # RLIMIT_FSIZE=0 turns every write into EFBIG, wherever a file can be created.
+    assert result["status"] == "ok", result
+    assert "written" not in result["result"], result
+
+
+@pytest.mark.parametrize("code", [
+    "def run(inputs, params):\n    item = (x for x in inputs)\n    return [str(item.gi_frame)]\n",
+    "def run(inputs, params):\n    return ['{0.real}'.format(1)]\n",
+    "def run(inputs, params):\n    return [params['t'].format(1)]\n",
+    "def run(inputs, params):\n    return ['{x}'.format_map({'x': 1})]\n",
+])
+def test_runtime_rejects_introspection_without_gatekeeper(code):
+    # The runner re-checks submitted code, so a caller that skips the
+    # gatekeeper still cannot use these routes.
+    result = execute(code, params={"t": "{0}"})
+    assert result["status"] == "error"
+    assert "PermissionError" in result["error"]
+
+
+def test_runtime_allows_plain_format_templates():
+    result = execute("def run(inputs, params):\n    return ['{}-{:>3}'.format('a', 7)]\n")
+    assert result == {**result, "status": "ok", "result": ["a-  7"]}
+
+
+def test_runner_and_policy_share_the_introspection_denylist():
+    from gatekeeper.policy import BASELINE_FORBIDDEN_ATTRIBUTES
+    from sandbox import runner
+    assert runner.FORBIDDEN_ATTRIBUTES == BASELINE_FORBIDDEN_ATTRIBUTES

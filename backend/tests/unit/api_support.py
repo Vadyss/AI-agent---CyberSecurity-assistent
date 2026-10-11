@@ -5,10 +5,9 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 
-from gatekeeper.types import Metrics, SkillInfo
-from orchestrator.config import Settings
+from gatekeeper.types import Metrics
+from tests.fakes import test_settings
 from orchestrator.main import create_app
 from orchestrator.run_store import PendingApproval
 
@@ -56,13 +55,13 @@ async def held_pipeline(run, gk, roles, emitter, settings, voice):
 
 def make_stub_app(tmp_path):
     gk = StubGatekeeper()
-    return create_app(settings=replace(Settings(), data_dir=tmp_path, llm_provider="mock", mock_delay_ms=0),
+    return create_app(settings=replace(test_settings(), data_dir=tmp_path, llm_provider="mock", mock_delay_ms=0),
                       gatekeeper=gk, sandbox=StubSandbox(), roles=SimpleNamespace(),
                       pipeline_runner=held_pipeline), gk
 
 
 async def prepare_approval(app, run_id):
-    run = app.state.store.get(run_id)
+    run = app.state.store.lookup(run_id)
     if not run.events:
         await asyncio.sleep(.01)
     await app.state.emitter.emit(run, "validation_done", "validation", {"dataset": "validation", "metrics": METRICS})

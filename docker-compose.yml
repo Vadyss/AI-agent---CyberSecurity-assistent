@@ -1,25 +1,101 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 name: hackathon
 
+# Production layout: oauth2-proxy is the only published service. It signs
+# users in with your OIDC provider and forwards their ID token to the frontend
+# and the API. Put a TLS-terminating reverse proxy in front of port 4180.
 services:
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+    restart: unless-stopped
+    ports:
+      - "${PUBLIC_BIND:-127.0.0.1}:4180:4180"
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=${OIDC_ISSUER:-}
+      - --client-id=${OIDC_AUDIENCE:-}
+      - --redirect-url=${PUBLIC_URL:-}/oauth2/callback
+      - --scope=openid email profile
+      - --code-challenge-method=S256
+      - --email-domain=*
+      - --cookie-secure=true
+      - --cookie-refresh=10m
+      - --reverse-proxy=true
+      - --skip-provider-button=true
+      # The backend verifies the ID token itself; no plain identity headers.
+      - --pass-authorization-header=true
+      - --pass-user-headers=false
+      - --set-xauthrequest=false
+      - --upstream=http://frontend:8080/
+      # Programmatic clients use X-API-Key on /m2m/; the backend checks the key.
+      - --upstream=http://backend:8000/m2m/
+      - --skip-auth-route=^/m2m/
+      - --upstream-timeout=60s
+    environment:
+      OAUTH2_PROXY_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
+      # oauth2-proxy refuses to start without it (scripts/bootstrap-env.sh creates one).
+      # Not ":?" here: compose would then also refuse the demo overlay, which disables this service.
+      OAUTH2_PROXY_COOKIE_SECRET: "${OAUTH2_PROXY_COOKIE_SECRET:-}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - frontend
+      - backend
+
   frontend:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://127.0.0.1:8000}
-    ports:
-      - "3000:8080"
+        # The browser reaches the API through oauth2-proxy, on the same origin.
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-${PUBLIC_URL:-http://localhost:4180}/api}
     depends_on:
       - backend
     restart: unless-stopped
 
-  backend:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: toolsmith
+      POSTGRES_USER: toolsmith
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (scripts/bootstrap-env.sh creates one)}"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "toolsmith", "-d", "toolsmith"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 128m
+    # Not published on the host; only the migrate and backend services reach it.
+
+  migrate:
     build: ./backend
-    ports:
-      - "${BACKEND_BIND_HOST:-127.0.0.1}:8000:8000"
-    networks:
-      - default
-      - sandbox_net
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://toolsmith:${POSTGRES_PASSWORD}@postgres:5432/toolsmith"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: "${APP_VERSION:-dev}"
+    # Not published: only oauth2-proxy (and the frontend's nginx) reach it.
     restart: unless-stopped
     environment:
       APIFY_TOKEN: "${APIFY_TOKEN:-}"
@@ -41,7 +117,8 @@ services:
       LLM_MAX_CALLS_PER_RUN: "${LLM_MAX_CALLS_PER_RUN:-25}"
       MOCK_SCENARIO: "${MOCK_SCENARIO:-}"
       MOCK_DELAY_MS: "${MOCK_DELAY_MS:-400}"
-      SANDBOX_URL: http://sandbox:8000
+      SANDBOX_URL: http://sandbox
+      SANDBOX_SOCKET: /run/toolsmith/sandbox.sock
       SANDBOX_TIMEOUT_S: "${SANDBOX_TIMEOUT_S:-30}"
       DATA_DIR: /data
       DATASETS_DIR: /app/datasets
@@ -52,10 +129,36 @@ services:
       ELEVENLABS_MODEL_ID: "${ELEVENLABS_MODEL_ID:-eleven_multilingual_v2}"
       EXAMINER_ENABLED: "${EXAMINER_ENABLED:-false}"
       RUN_TIMEOUT_S: "${RUN_TIMEOUT_S:-1500}"
-      CORS_ORIGINS: "${CORS_ORIGINS:-}"
+      # Browser origins allowed for CORS and WebSocket handshakes (cross-site
+      # WebSocket hijacking protection): the public URL of oauth2-proxy.
+      CORS_ORIGINS: "${CORS_ORIGINS:-${PUBLIC_URL:-}}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      ENVIRONMENT: "${ENVIRONMENT:-production}"
+      DATABASE_URL: "postgresql+psycopg://toolsmith:${POSTGRES_PASSWORD}@postgres:5432/toolsmith"
+      AUTH_MODE: "${AUTH_MODE:-oidc}"
+      OIDC_ISSUER: "${OIDC_ISSUER:-}"
+      OIDC_AUDIENCE: "${OIDC_AUDIENCE:-}"
+      OIDC_JWKS_URL: "${OIDC_JWKS_URL:-}"
+      OIDC_ALGORITHMS: "${OIDC_ALGORITHMS:-}"
+      BOOTSTRAP_ADMIN_EMAIL: "${BOOTSTRAP_ADMIN_EMAIL:-}"
+      BOOTSTRAP_TENANT_NAME: "${BOOTSTRAP_TENANT_NAME:-}"
+      SIGNUP_MODE: "${SIGNUP_MODE:-}"
+      RATE_LIMIT_PER_MINUTE: "${RATE_LIMIT_PER_MINUTE:-}"
+      RUN_RATE_LIMIT_PER_MINUTE: "${RUN_RATE_LIMIT_PER_MINUTE:-}"
+      DEFAULT_MONTHLY_BUDGET_USD: "${DEFAULT_MONTHLY_BUDGET_USD:-}"
+      DEFAULT_MAX_RUNS_PER_DAY: "${DEFAULT_MAX_RUNS_PER_DAY:-}"
+      WORKER_CONCURRENCY: "${WORKER_CONCURRENCY:-}"
+      MAX_QUEUED_RUNS_PER_TENANT: "${MAX_QUEUED_RUNS_PER_TENANT:-}"
+      RUN_MAX_ATTEMPTS: "${RUN_MAX_ATTEMPTS:-}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+      RUN_RETENTION_DAYS: "${RUN_RETENTION_DAYS:-}"
+      # Prometheus metrics on port 9100 inside the Docker network only (not published).
+      METRICS_PORT: "${METRICS_PORT:-9100}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      APP_VERSION: "${APP_VERSION:-dev}"
     volumes:
       - frankenstein-data:/data
+      - sandbox-socket:/run/toolsmith
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777,noexec,nosuid
@@ -66,26 +169,49 @@ services:
     depends_on:
       sandbox:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   sandbox:
     build: ./sandbox
-    networks:
-      - sandbox_net
+    # No network interface at all: the backend talks to the supervisor over a
+    # Unix socket on a shared volume, so submitted code has nothing to reach.
+    network_mode: none
     restart: unless-stopped
+    # tini reaps orphans, so zombie processes never pin a job UID.
+    init: true
     read_only: true
     tmpfs:
-      - /tmp:size=64m,mode=1777,noexec,nosuid
+      - /tmp:size=16m,mode=0700,noexec,nosuid,nodev
     cap_drop:
       - ALL
+    # Only what the supervisor needs to start each job under a private UID and
+    # to kill every process of that UID afterwards.
+    cap_add:
+      - SETUID
+      - SETGID
+      - KILL
     security_opt:
       - no-new-privileges:true
+    # Membership in the backend's group lets the supervisor restrict the
+    # socket directory to that group; job UIDs are not members.
+    group_add:
+      - "10001"
+    volumes:
+      - sandbox-socket:/run/toolsmith
+    environment:
+      SANDBOX_ISOLATION: uid
+      SANDBOX_SOCKET: /run/toolsmith/sandbox.sock
+      SANDBOX_CLIENT_GID: "10001"
+      SANDBOX_MAX_JOBS: "${SANDBOX_MAX_JOBS:-2}"
+      SANDBOX_MAX_JOBS_PER_TENANT: "${SANDBOX_MAX_JOBS_PER_TENANT:-1}"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100
 
-networks:
-  sandbox_net:
-    internal: true
-
 volumes:
   frankenstein-data: {}
+  sandbox-socket: {}
+  postgres-data: {}

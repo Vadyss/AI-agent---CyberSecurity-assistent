@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 from fastapi.testclient import TestClient
 
-from main import app
+from orchestrator.main import create_app
+from tests.fakes import test_settings
 
-client = TestClient(app)
 
-
-def test_health():
+def test_health(tmp_path):
+    client = TestClient(create_app(settings=test_settings(data_dir=tmp_path)))
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "contract_version": 1}

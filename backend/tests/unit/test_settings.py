@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -12,12 +12,73 @@ from orchestrator.config import Settings
 def isolated_settings_environment(monkeypatch):
     for name in Settings.__dataclass_fields__:
         monkeypatch.delenv(name.upper(), raising=False)
+    # Parsing tests run in the test environment; production rules are tested explicitly.
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_MODE", "disabled")
+
+
+TEST_DEFAULTS = replace(Settings(), environment="test", auth_mode="disabled")
 
 
 def test_blank_names_only_env_uses_defaults(monkeypatch):
     for name in Settings.__dataclass_fields__:
         monkeypatch.setenv(name.upper(), "")
-    assert Settings.from_env() == Settings()
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_MODE", "disabled")
+    assert Settings.from_env() == replace(Settings(), environment="test", auth_mode="disabled")
+
+
+def test_defaults_are_production_and_refuse_to_start_without_database_and_oidc(monkeypatch):
+    assert (Settings().environment, Settings().auth_mode) == ("production", "oidc")
+    monkeypatch.delenv("ENVIRONMENT")
+    monkeypatch.delenv("AUTH_MODE")
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        Settings.from_env()
+
+
+PRODUCTION = {"ENVIRONMENT": "production", "AUTH_MODE": "oidc", "DATABASE_URL": "postgresql+psycopg://u:p@db/t", "OIDC_ISSUER": "https://idp.example",
+              "OIDC_AUDIENCE": "toolsmith", "OIDC_JWKS_URL": "http://idp:8080/jwks"}
+
+
+def test_complete_production_configuration_is_accepted(monkeypatch):
+    for name, value in PRODUCTION.items():
+        monkeypatch.setenv(name, value)
+    settings = Settings.from_env()
+    assert settings.environment == "production" and settings.oidc_algorithms == ("RS256", "ES256")
+    assert "postgresql" not in repr(settings)
+
+
+@pytest.mark.parametrize("change,message", [
+    ({"AUTH_MODE": "disabled"}, "cannot be disabled"),
+    ({"DATABASE_URL": "sqlite+aiosqlite:///x.db"}, "PostgreSQL"),
+    ({"LLM_PROVIDER": "mock"}, "mock"),
+    ({"OIDC_ISSUER": "http://idp.example"}, "HTTPS"),
+    ({"OIDC_JWKS_URL": ""}, None),
+    ({"OIDC_ALGORITHMS": "HS256"}, "asymmetric"),
+    ({"OIDC_ALGORITHMS": "none"}, "asymmetric"),
+    ({"SIGNUP_MODE": "open"}, "SIGNUP_MODE"),
+    ({"DEFAULT_MONTHLY_BUDGET_USD": "-1"}, "negative"),
+    ({"DEFAULT_MONTHLY_BUDGET_USD": "lots"}, "decimal"),
+    ({"WORKER_CONCURRENCY": "0"}, "positive"),
+    ({"ENVIRONMENT": "staging"}, "ENVIRONMENT"),
+])
+def test_unsafe_production_configuration_fails_closed(monkeypatch, change, message):
+    for name, value in {**PRODUCTION, **change}.items():
+        monkeypatch.setenv(name, value)
+    if change == {"OIDC_JWKS_URL": ""}:
+        # An empty value means "unset"; the default is empty too, so OIDC is incomplete.
+        message = "OIDC_ISSUER"
+    with pytest.raises(ValueError, match=message):
+        Settings.from_env()
+
+
+def test_development_requires_a_database_but_may_disable_authentication(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("AUTH_MODE", "disabled")
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        Settings.from_env()
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@db/t")
+    assert Settings.from_env().auth_mode == "disabled"
 
 
 def test_role_models_inherit_configured_default(monkeypatch):
@@ -41,7 +102,7 @@ def test_relay_models_and_execution_limits_have_required_defaults():
     assert settings.llm_max_tokens == 16000 and settings.llm_max_tokens_cap == 32000
     assert settings.llm_timeout_s == 180 and settings.run_timeout_s == 1500
     assert settings.llm_max_retries == 2 and settings.llm_max_calls_per_run == 25
-    assert Settings.from_env() == settings
+    assert Settings.from_env() == replace(settings, environment="test", auth_mode="disabled")
 
 
 def test_examiner_and_fallback_defaults_do_not_inherit_a_main_model_override(monkeypatch):

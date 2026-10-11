@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Lint for real defects (pyflakes, syntax errors, bugbear), not formatting.
+target-version = "py312"
+line-length = 130
+
+[lint]
+select = ["F", "E9", "B"]
+# zip(strict=) has not been adopted; the inputs are length-checked where it matters.
+ignore = ["B905"]
+
+[lint.per-file-ignores]
+"backend/tests/**" = ["B017"]
+"backend/seed_skills/**" = ["B007"]
+# Compatibility entrypoint that re-exports the app.
+"sandbox/main.py" = ["F401"]

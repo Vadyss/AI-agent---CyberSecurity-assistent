@@ -2,6 +2,7 @@
 """Append-only audit trail whose canonical records form a SHA-256 chain."""
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -14,6 +15,9 @@ from .recipe import canonical_json
 
 ZERO_HASH = "0" * 64
 LOGGER = logging.getLogger(__name__)
+# Who caused the records written in the current context ("user:<id>",
+# "api_key:<id>", "local:local"); None means the system itself.
+AUDIT_ACTOR: ContextVar[str | None] = ContextVar("audit_actor", default=None)
 
 
 def now_iso() -> str:
@@ -95,7 +99,8 @@ class AuditLog:
     def append(self, kind: str, run_id: str | None = None, detail: dict | None = None) -> dict:
         with self.lock:
             record = {"n": self.n + 1, "ts": now_iso(), "run_id": run_id, "kind": kind,
-                      "detail": bounded_detail(detail or {}), "prev_hash": self.previous}
+                      "actor": AUDIT_ACTOR.get(), "detail": bounded_detail(detail or {}),
+                      "prev_hash": self.previous}
             record["hash"] = record_hash(record)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(canonical_json(record) + "\n")

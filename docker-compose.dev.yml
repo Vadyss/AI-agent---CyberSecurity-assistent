@@ -1,0 +1,80 @@
+# Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
+# Local development with real sign-in: oauth2-proxy in front of everything and
+# a throwaway OIDC provider (navikt mock-oauth2-server). It accepts ANY user
+# name, so never expose it beyond localhost. Start with scripts/dev-up.sh.
+#
+# Sign in at http://localhost:4180. The login page is pre-filled with
+# dev@example.test, the bootstrap administrator. To act as someone else, change
+# the user name and the e-mail in the claims field.
+services:
+  mock-idp:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.5
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - ./deploy/dev-idp/login.html:/app/login/login.html:ro
+    environment:
+      # The custom login page pre-fills the bootstrap administrator's claims.
+      JSON_CONFIG: >-
+        {"interactiveLogin": true, "loginPagePath": "/app/login/login.html",
+        "tokenCallbacks": [{"issuerId": "default", "tokenExpiry": 3600, "requestMappings": []}]}
+
+  oauth2-proxy:
+    # Discovery is skipped: the browser signs in at localhost:8090, while the
+    # proxy and the backend talk to the provider inside the Docker network.
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://mock-idp:8080/default
+      - --skip-oidc-discovery=true
+      - --login-url=http://localhost:8090/default/authorize
+      - --redeem-url=http://mock-idp:8080/default/token
+      - --oidc-jwks-url=http://mock-idp:8080/default/jwks
+      - --client-id=toolsmith-proxy
+      - --redirect-url=http://localhost:4180/oauth2/callback
+      - --scope=openid email profile
+      - --code-challenge-method=S256
+      - --email-domain=*
+      - --cookie-secure=false
+      - --cookie-refresh=10m
+      - --skip-provider-button=true
+      - --pass-authorization-header=true
+      - --pass-user-headers=false
+      - --set-xauthrequest=false
+      - --upstream=http://frontend:8080/
+      - --upstream=http://backend:8000/m2m/
+      - --skip-auth-route=^/m2m/
+      - --upstream-timeout=60s
+    environment:
+      OAUTH2_PROXY_CLIENT_SECRET: dev-not-secret
+    depends_on:
+      - mock-idp
+      - frontend
+      - backend
+
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:4180/api
+
+  backend:
+    environment:
+      ENVIRONMENT: development
+      AUTH_MODE: oidc
+      OIDC_ISSUER: http://mock-idp:8080/default
+      OIDC_AUDIENCE: toolsmith-proxy
+      OIDC_JWKS_URL: http://mock-idp:8080/default/jwks
+      BOOTSTRAP_ADMIN_EMAIL: dev@example.test
+      BOOTSTRAP_TENANT_NAME: Development
+      CORS_ORIGINS: http://localhost:4180
+      LLM_PROVIDER: "${LLM_PROVIDER:-mock}"
+    volumes:
+      - frankenstein-data-dev:/data
+  postgres:
+    volumes:
+      - postgres-data-dev:/var/lib/postgresql
+
+volumes:
+  frankenstein-data-dev: {}
+  postgres-data-dev: {}

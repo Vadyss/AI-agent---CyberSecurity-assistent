@@ -12,6 +12,7 @@ from fastapi import WebSocket
 class Subscriber:
     ws: WebSocket
     queue: asyncio.Queue
+    tenant_id: object = None
     task: asyncio.Task | None = None
     disconnected: bool = False
 
@@ -23,15 +24,18 @@ class WebSocketHub:
         self.clients: set[Subscriber] = set()
         self.cleanup_tasks: set[asyncio.Task] = set()
 
-    async def connect(self, ws: WebSocket) -> Subscriber:
+    async def connect(self, ws: WebSocket, tenant_id: object) -> Subscriber:
         await ws.accept()
-        client = Subscriber(ws, asyncio.Queue(maxsize=self.queue_size))
+        client = Subscriber(ws, asyncio.Queue(maxsize=self.queue_size), tenant_id)
         self.clients.add(client)
         client.task = asyncio.create_task(self._send(client))
         return client
 
-    def broadcast(self, event: dict) -> None:
+    def broadcast(self, event: dict, tenant_id: object) -> None:
+        """Deliver only to subscribers of the tenant that owns the event."""
         for client in tuple(self.clients):
+            if client.tenant_id != tenant_id:
+                continue
             try:
                 client.queue.put_nowait(event)
             except asyncio.QueueFull:

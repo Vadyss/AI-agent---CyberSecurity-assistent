@@ -1,7 +1,6 @@
 # Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved.
 from __future__ import annotations
 
-import asyncio
 import re
 
 import pytest
@@ -17,7 +16,7 @@ from tests.unit.api_support import METRICS
 async def test_untrusted_request_is_preserved_as_plain_json(text):
     run = RunState("run_aabb", text)
     class Hub:
-        def broadcast(self, event):
+        def broadcast(self, event, tenant_id):
             assert run.events[-1] == event
             assert run.last_seq == event["seq"]
     emitter = EventEmitter(Hub())
@@ -60,19 +59,23 @@ async def test_no_installation_without_human_decision():
         await emitter.emit(run, "rule_approved", "done", {"rule_name": "abc", "comment": None})
 
 
-async def test_run_store_is_bounded_and_intake_is_atomic():
+def test_run_store_keeps_only_recent_finished_runs_in_memory():
     store = RunStore(max_runs=3)
-    results = await asyncio.gather(store.create("first"), store.create("second"), return_exceptions=True)
-    assert sum(isinstance(r, RunState) for r in results) == 1
-    for _ in range(5):
-        for r in store.runs.values():
-            r.status = "failed"
-        await store.create("next")
+    for n in range(6):
+        for run in store.runs.values():
+            run.status = "failed"
+        store.adopt(f"run_{n:04d}abcd", "request", None, "local:local")
     assert len(store.runs) == 3
+    # Active runs are never evicted, even beyond the bound.
+    crowded = RunStore(max_runs=1)
+    crowded.adopt("run_0000aaaa", "a", None, "x")
+    crowded.adopt("run_0000bbbb", "b", None, "x")
+    assert set(crowded.runs) == {"run_0000aaaa", "run_0000bbbb"}
 
 
 def test_exact_event_catalog():
     assert EVENT_TYPES == {"run_started", "plan_ready", "skill_reused", "capability_missing", "forge_started",
                            "skill_tests_failed", "skill_candidate_ready", "rule_drafted", "rule_evaluated",
                            "validation_done", "summary", "voice_ready", "awaiting_approval", "skill_installed",
-                           "rule_approved", "rule_rejected", "policy_rejected", "run_failed", "llm_usage"}
+                           "rule_approved", "rule_rejected", "policy_rejected", "run_failed", "run_cancelled",
+                           "llm_usage"}
