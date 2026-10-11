@@ -1,7 +1,9 @@
 <!-- Copyright (c) 2026 Adam Krúpa and Ondra Csajka. All rights reserved. -->
-# Frankenstein
+# Toolsmith
 
-Frankenstein is an agent that helps a security analyst write detection rules. The analyst describes an attack in plain language (for example, "detect SSH brute force"). The agent plans the work and checks which skills it already has. If a skill is missing, such as a log parser or a sliding-window aggregation, the agent writes it, tests it in an isolated sandbox, and adds it to a growing skill library. It then drafts a rule, tunes it on one dataset, validates it on a second, independent dataset, and asks the analyst to approve or reject it. Nothing is installed until a human approves.
+Toolsmith is an agent for security analysts that builds its own tools. An analyst describes an attack in plain language, for example "detect SSH password spraying". The agent plans the work and checks which tools it already has. If one is missing, such as a log parser or a sliding-window aggregation, it writes the tool, tests it in an isolated sandbox, drafts a detection rule, tunes it on one dataset and validates it on a second, independent one. A human reviews the code and approves; only then do the new tools join the team's library and get reused by later runs.
+
+Built for the hackathon brief "Frankenstein" (a self-building agent) and hardened into a multi-tenant service.
 
 ## Authors
 
@@ -9,114 +11,93 @@ Adam Krúpa and Ondra Csajka. All rights reserved.
 
 This project is proprietary. Use, copying, modification, and distribution require written consent from both authors. See [LICENSE](LICENSE).
 
-## Architecture
+## How it works
 
 ```
-Browser (Next.js, static export served by nginx)
-   │  HTTP + WebSocket
-   ▼
-Orchestrator (FastAPI, backend/orchestrator)  ──►  LLM (Apify relay → OpenRouter)
-   │  proposals only
-   ▼
-Gatekeeper (backend/gatekeeper)  ──►  Sandbox (separate container, no network)
+Browser / API client ── oauth2-proxy (OIDC sign-in) ── frontend + API (/v1)
+                                                         │  proposals only
+                        Model provider ◄── planner, forge, rule author, summarizer
+                                                         │
+                                         gatekeeper (per tenant) ── sandbox (no network, private UID per job)
+                                                         │
+                                  PostgreSQL + per-tenant tool library and audit chain
 ```
 
-Each LLM-backed role only proposes. The gatekeeper decides and is the only component that writes skills, rules, and audit records.
+Language models only propose. A deterministic gatekeeper enforces [the policy](backend/policy/policy.yaml), tests every tool and measures every rule. A human approves. Every approval and every sandbox execution is recorded in the tenant's hash-chained audit log. Details: [architecture](Docs/ARCHITECTURE.md), [security](SECURITY.md), [threat model](Docs/THREAT_MODEL.md).
 
-| Component | Where | Job |
-|---|---|---|
-| Planner | `backend/orchestrator/planner.py` | Breaks the request into steps and decides which skills are needed. |
-| Forge | `backend/orchestrator/forge.py` | Writes missing skills (manifest, code, tests), with up to 3 attempts per skill. |
-| Rule author | `backend/orchestrator/rule_author.py` | Drafts the detection rule (a recipe) from the available skills. |
-| Summarizer | `backend/orchestrator/summarizer.py` | Writes the short run summary. Falls back to a template if the model fails. |
-| Gatekeeper | `backend/gatekeeper/` | Deterministic checks: policy, static code analysis, plan and recipe validation, metrics, skill registry, audit log. |
-| Examiner (optional) | `backend/examiner/` | Generates independent test data for custom attack types. Off by default (`EXAMINER_ENABLED=false`). |
-| Sandbox | `sandbox/` | Runs untrusted skill code in a restricted subprocess inside a container with no internet access. |
-| Policy | `backend/policy/policy.yaml` | Immutable rules: allowed imports, forbidden calls, size and time limits, precision and recall thresholds. |
+## Quick start
 
-Untrusted text (logs, requests, test output) is wrapped as data before it reaches a model, and every proposal goes through the gatekeeper before anything runs.
+Requirements: Docker with Compose. For the scripts: a POSIX shell.
 
-## Setup
-
-Requirements: Docker with Compose. For local development without Docker you also need Python 3.12 and Node.js 22.
-
-1. Create your local configuration:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Fill in `APIFY_TOKEN` (or `LLM_API_KEY`). `.env` is git-ignored. `.env.example` only lists variable names, so never commit real values.
-
-2. Start the stack from the project root:
-
-   ```bash
-   docker compose up --build
-   ```
-
-3. Open `http://localhost:3000`. Check the backend at `http://127.0.0.1:8000/health`.
-
-**Demo without any LLM calls** (mock model):
+**Demo (no sign-in, mock model, localhost only):**
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+POSTGRES_PASSWORD=demo docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
 ```
 
-### Useful settings
+Open `http://localhost:3000`.
 
-- `NEXT_PUBLIC_API_BASE`: backend address used by the browser (default `http://127.0.0.1:8000`). It is baked in at build time, so rebuild the frontend after changing it.
-- `CORS_ORIGINS`: allowed frontend origins (default `http://localhost:3000,http://127.0.0.1:3000`). The WebSocket checks the `Origin` header against the same list.
-- `BACKEND_BIND_HOST`: interface the backend port is published on (default `127.0.0.1`).
-- `LLM_MODEL*`, `LLM_MAX_CALLS_PER_RUN`, `RUN_TIMEOUT_S`: model choice and per-run limits. See `.env.example` for the full list.
-
-### Local development
+**Development with real sign-in** (oauth2-proxy and a throwaway identity provider; mock model unless you set `LLM_PROVIDER`):
 
 ```bash
-python -m pip install -r backend/requirements.txt
-python -m uvicorn orchestrator.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
+sh scripts/dev-up.sh
 ```
 
-A full run needs the sandbox, so use the Docker stack, or point `SANDBOX_URL` at a running sandbox and set a writable `DATA_DIR`. Then, in a second terminal:
+Open `http://localhost:4180` and sign in with the pre-filled development account (the first administrator). `python scripts/auth_smoke.py` checks the whole sign-in chain.
+
+**Production:** follow the [operations guide](Docs/OPERATIONS.md): register an OIDC client, fill `.env`, then `docker compose up --build -d --wait` behind a TLS reverse proxy. The backend refuses to start with an incomplete or unsafe configuration.
+
+## Using the API
+
+The API is versioned under `/v1`; the contract is [Docs/api/openapi.json](Docs/api/openapi.json).
 
 ```bash
-cd frontend
-npm ci
-npm run dev
+# Programmatic access with a tenant API key (created by an admin: POST /api/v1/api-keys)
+curl -H "X-API-Key: tsk_..." https://toolsmith.example.com/m2m/v1/runs
+curl -H "X-API-Key: tsk_..." -H "Content-Type: application/json" \
+     -d '{"request": "Detect SSH password spraying"}' https://toolsmith.example.com/m2m/v1/runs
 ```
 
-More frontend details are in [frontend/README.md](frontend/README.md).
+Roles: `viewer` reads; `analyst` also starts, cancels and retries runs, reviews candidate code and approves or rejects; `admin` also manages members, invitations, API keys, quotas and data deletion.
 
-### Tests
+## Cost tracking and quotas
+
+Every model call is recorded with its tenant, run, model, tokens, cost and prompt version.
+
+- The cost reported by the provider (`usage.cost`) is used when present; `backend/orchestrator/pricing.json` holds published rates as a fallback. If any call's cost is unknown, totals say so instead of showing a partial sum. Money is handled as `Decimal`.
+- Each tenant has a monthly model budget and a daily run quota (`DEFAULT_MONTHLY_BUDGET_USD`, `DEFAULT_MAX_RUNS_PER_DAY`, adjustable per tenant). The budget is checked before every model call. `GET /v1/usage` shows the month so far.
+- Costs cover model inference only; they exclude Apify plan markup and hosting. Details: [COST_TRACKING.md](Docs/backend/COST_TRACKING.md).
+
+## Development
 
 ```bash
-cd backend
-python -m pip install -r requirements.txt -r requirements-dev.txt -r ../sandbox/requirements.txt
-python -m pytest
+sh backend/scripts/test.sh            # backend and sandbox tests (Docker, SQLite and PostgreSQL)
+cd frontend && npm ci && npm test     # frontend tests
+python -m evals.run --provider mock   # from backend/: evaluation harness, see Docs/EVALS.md
 ```
 
-Frontend tests: `cd frontend && npm test`. CI (GitHub Actions) runs the backend, frontend, and an isolated Docker integration job, and deploys from `main` only.
-
-## Cost tracking
-
-Every LLM call goes through the client in `backend/orchestrator/llm.py` and is recorded in a per-run ledger.
-
-- The cost reported by the provider (`usage.cost` from OpenRouter) is always used when present.
-- `backend/orchestrator/pricing.json` holds published per-million-token rates and is only a fallback when the provider does not report a cost. Models marked `provider_reported_only` have no fallback rates. Update the file by hand and restart the backend.
-- If any call's cost is unknown, the run total is shown as unknown (with a known subtotal), never as a partial sum.
-- All money is handled as `Decimal` and sent to the UI as exact decimal strings.
-- Each run writes `<DATA_DIR>/runs/<run_id>/usage.json` with per-call records and a final summary: cost by step, retries, and an average over recent real runs (mock runs are excluded).
-- The UI shows live usage in the "Model usage" panel of each run.
-
-Costs cover model inference only. They exclude Apify plan markup and relay hosting. Details: [COST_TRACKING.md](Docs/backend/COST_TRACKING.md).
+CI runs lint (ruff, mypy), secret scanning, dependency and image vulnerability scans, SBOM generation, all test suites, an isolated Docker integration test and a sign-in chain test. Deployment from `main` needs all of them.
 
 ## Known limitations
 
-- **No authentication.** Anyone who can reach the backend can start runs, approve or reject rules, and read events over HTTP and WebSocket. CORS is not access control.
-- **The backend binds to 127.0.0.1 by default.** Only change `BACKEND_BIND_HOST` on a trusted network, or put an authenticating reverse proxy in front.
-- Run history and events are kept in memory and are lost on restart. Approved skills, rules, the audit log, and usage files are stored on the `/data` volume.
-- Only one run can be active at a time. A run waiting for approval blocks new runs until it is approved or rejected.
-- The sandbox's Python-level guards are defense in depth. The container boundary is what actually isolates untrusted code.
+- **One host.** The design targets a single machine with Docker Compose. Rate limits are per process; the queue workers run inside the backend process.
+- **Shared kernel.** Generated code runs as a private, unprivileged UID without network or capabilities, but shares the host kernel. gVisor is the next step if your risk profile demands it ([D-005](Docs/DECISIONS.md)).
+- **Approval does not survive a restart.** A run awaiting approval when the backend restarts is closed as failed and must be started again; runs that were executing are retried automatically.
+- **A run awaiting approval blocks its tenant's queue**, because its candidate tools could conflict with a new run's.
+- **Evaluation:** the evaluation suite has five cases and no recorded live-model baseline yet ([EVALS.md](Docs/EVALS.md)).
+- **Frontend:** the web UI predates sign-in; the changes it needs are listed in [FRONTEND_CHANGES.md](Docs/FRONTEND_CHANGES.md). Until then it works only in the demo.
 
-## More documentation
+## Documentation
 
-[ARCHITECTURE.md](Docs/backend/ARCHITECTURE.md), [PROGRESS.md](Docs/backend/PROGRESS.md), [REPORT.md](Docs/backend/REPORT.md), [SECURITY_REVIEW.md](Docs/backend/SECURITY_REVIEW.md), [LLM_RELAY.md](Docs/backend/LLM_RELAY.md), [LLM_LIVE_TEST.md](Docs/backend/LLM_LIVE_TEST.md).
+| Document | Contents |
+|---|---|
+| [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md) | Components, deployment and run lifecycle diagrams |
+| [Docs/DECISIONS.md](Docs/DECISIONS.md) | Architecture decisions with reasons and trade-offs |
+| [SECURITY.md](SECURITY.md) | Reporting vulnerabilities, security design summary |
+| [Docs/THREAT_MODEL.md](Docs/THREAT_MODEL.md) | STRIDE threat model of the generated-code path |
+| [Docs/PRIVACY.md](Docs/PRIVACY.md) | GDPR notes: stored data, retention, data-subject rights |
+| [Docs/OPERATIONS.md](Docs/OPERATIONS.md) | Deployment, configuration, observability, backups, updates |
+| [Docs/EVALS.md](Docs/EVALS.md) | Measuring the model-backed roles |
+| [Docs/FRONTEND_CHANGES.md](Docs/FRONTEND_CHANGES.md) | What the frontend must change for the new API |
+| [Docs/api/openapi.json](Docs/api/openapi.json) | The API contract |
+| [Docs/backend/ARCHITECTURE.md](Docs/backend/ARCHITECTURE.md) | Detailed design of the original agent and gatekeeper |
