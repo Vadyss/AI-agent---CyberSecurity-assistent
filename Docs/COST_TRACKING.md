@@ -5,7 +5,7 @@ Every model call is recorded with its tenant, run, role, model, tokens, cost and
 
 ## Provider and call sites
 
-The default path is an Apify Standby relay → Apify OpenRouter proxy → model provider (see [LLM_PROVIDERS.md](LLM_PROVIDERS.md)). The application uses **HTTPX**, not an OpenAI or Anthropic SDK; the legacy synchronous compatibility function uses **requests**. Requests use the existing `/chat/completions` path and bearer header. There is no streaming. [OpenRouter usage documentation](https://openrouter.ai/docs/cookbook/administration/usage-accounting) confirms that non-streaming completions include native token usage, cost and cache information automatically; no additional request option is needed.
+Calls go to the configured OpenAI-compatible endpoint; one supported path is an Apify Standby relay → Apify OpenRouter proxy → model provider (see [LLM_PROVIDERS.md](LLM_PROVIDERS.md)). The application uses **HTTPX**, not an OpenAI or Anthropic SDK; the legacy synchronous compatibility function uses **requests**. Requests use the existing `/chat/completions` path and bearer header. There is no streaming. [OpenRouter usage documentation](https://openrouter.ai/docs/cookbook/administration/usage-accounting) confirms that non-streaming completions include native token usage, cost and cache information automatically; no additional request option is needed.
 
 | Call site | Step | Configured model | Additional calls |
 |---|---|---|---|

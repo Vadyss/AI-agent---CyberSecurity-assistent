@@ -21,7 +21,7 @@ class Settings:
     llm_provider: str = "apify"
     apify_token: str = field(default="", repr=False)
     llm_api_key: str = field(default="", repr=False)
-    llm_base_url: str = "https://piquant-peacoat--llm-relay.apify.actor/v1"
+    llm_base_url: str = ""
     llm_model: str = "anthropic/claude-sonnet-5.5"
     llm_model_planner: str = "anthropic/claude-sonnet-5.5"
     llm_model_forge: str = "anthropic/claude-sonnet-5.5"
@@ -131,6 +131,8 @@ class Settings:
     def validate(self) -> Settings:
         """Refuse unsafe or inconsistent configuration before the server starts."""
         self.validate_llm()
+        if self.llm_provider != "mock" and not self.llm_base_url.strip():
+            raise ValueError("LLM_BASE_URL is required for the apify and openai_compatible providers (or use LLM_PROVIDER=mock).")
         if self.environment not in ENVIRONMENTS:
             raise ValueError("ENVIRONMENT must be production, development or test.")
         if self.auth_mode not in {"oidc", "disabled"}:

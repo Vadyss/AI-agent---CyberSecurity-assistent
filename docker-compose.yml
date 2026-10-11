@@ -101,7 +101,7 @@ services:
       APIFY_TOKEN: "${APIFY_TOKEN:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_PROVIDER: "${LLM_PROVIDER:-apify}"
-      LLM_BASE_URL: "${LLM_BASE_URL:-https://piquant-peacoat--llm-relay.apify.actor/v1}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
       LLM_MODEL: "${LLM_MODEL:-anthropic/claude-sonnet-5.5}"
       LLM_MODEL_PLANNER: "${LLM_MODEL_PLANNER:-${LLM_MODEL:-anthropic/claude-sonnet-5.5}}"
       LLM_MODEL_FORGE: "${LLM_MODEL_FORGE:-${LLM_MODEL:-anthropic/claude-sonnet-5.5}}"

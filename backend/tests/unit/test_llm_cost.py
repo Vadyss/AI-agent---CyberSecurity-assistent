@@ -10,7 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from gatekeeper.types import ParseFailure
-from orchestrator.config import Settings
+from orchestrator.config import Settings as _Settings
+
+
+def Settings(**overrides):
+    """Settings with a placeholder endpoint; the provider URL has no default."""
+    return _Settings(**{"llm_base_url": "https://llm.example.invalid/v1", **overrides})
 from orchestrator.llm import HttpLlmClient, ask, bind_run_counters, reset_run_counters
 from orchestrator.models import RunStats
 from orchestrator.run_store import RunCounters
@@ -104,7 +109,7 @@ async def test_summary_event_serializes_cost_and_old_missing_cost_is_null():
 
 def test_sync_compatibility_client_also_counts_cost(monkeypatch):
     settings = Settings(llm_provider="openai_compatible", llm_api_key="test-key")
-    monkeypatch.setattr(Settings, "from_env", lambda **kwargs: settings)
+    monkeypatch.setattr(_Settings, "from_env", lambda **kwargs: settings)
     monkeypatch.setattr("orchestrator.llm.requests.post", lambda *args, **kwargs: response(.025))
     stats = RunCounters()
     binding = bind_run_counters(stats)

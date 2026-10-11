@@ -15,9 +15,10 @@ def isolated_settings_environment(monkeypatch):
     # Parsing tests run in the test environment; production rules are tested explicitly.
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_MODE", "disabled")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
 
 
-TEST_DEFAULTS = replace(Settings(), environment="test", auth_mode="disabled")
+TEST_DEFAULTS = replace(Settings(), environment="test", auth_mode="disabled", llm_base_url="https://llm.example/v1")
 
 
 def test_blank_names_only_env_uses_defaults(monkeypatch):
@@ -25,7 +26,9 @@ def test_blank_names_only_env_uses_defaults(monkeypatch):
         monkeypatch.setenv(name.upper(), "")
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_MODE", "disabled")
-    assert Settings.from_env() == replace(Settings(), environment="test", auth_mode="disabled")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example/v1")
+    assert Settings.from_env() == replace(Settings(), environment="test", auth_mode="disabled",
+                                          llm_base_url="https://llm.example/v1")
 
 
 def test_defaults_are_production_and_refuse_to_start_without_database_and_oidc(monkeypatch):
@@ -37,7 +40,8 @@ def test_defaults_are_production_and_refuse_to_start_without_database_and_oidc(m
 
 
 PRODUCTION = {"ENVIRONMENT": "production", "AUTH_MODE": "oidc", "DATABASE_URL": "postgresql+psycopg://u:p@db/t", "OIDC_ISSUER": "https://idp.example",
-              "OIDC_AUDIENCE": "toolsmith", "OIDC_JWKS_URL": "http://idp:8080/jwks"}
+              "OIDC_AUDIENCE": "toolsmith", "OIDC_JWKS_URL": "http://idp:8080/jwks",
+              "LLM_BASE_URL": "https://llm.example/v1"}
 
 
 def test_complete_production_configuration_is_accepted(monkeypatch):
@@ -49,6 +53,7 @@ def test_complete_production_configuration_is_accepted(monkeypatch):
 
 
 @pytest.mark.parametrize("change,message", [
+    ({"LLM_BASE_URL": ""}, "LLM_BASE_URL is required"),
     ({"AUTH_MODE": "disabled"}, "cannot be disabled"),
     ({"DATABASE_URL": "sqlite+aiosqlite:///x.db"}, "PostgreSQL"),
     ({"LLM_PROVIDER": "mock"}, "mock"),
@@ -92,7 +97,7 @@ def test_role_models_inherit_configured_default(monkeypatch):
 
 def test_relay_models_and_execution_limits_have_required_defaults():
     settings = Settings()
-    assert settings.llm_base_url == "https://piquant-peacoat--llm-relay.apify.actor/v1"
+    assert settings.llm_base_url == ""
     assert settings.llm_model == "anthropic/claude-sonnet-5.5"
     assert all(getattr(settings, f"llm_model_{role}") == "anthropic/claude-sonnet-5.5"
                for role in ("planner", "forge", "rule", "summary"))
@@ -102,7 +107,7 @@ def test_relay_models_and_execution_limits_have_required_defaults():
     assert settings.llm_max_tokens == 16000 and settings.llm_max_tokens_cap == 32000
     assert settings.llm_timeout_s == 180 and settings.run_timeout_s == 1500
     assert settings.llm_max_retries == 2 and settings.llm_max_calls_per_run == 25
-    assert Settings.from_env() == replace(settings, environment="test", auth_mode="disabled")
+    assert Settings.from_env() == replace(settings, environment="test", auth_mode="disabled", llm_base_url="https://llm.example/v1")
 
 
 def test_examiner_and_fallback_defaults_do_not_inherit_a_main_model_override(monkeypatch):

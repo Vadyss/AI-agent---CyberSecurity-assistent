@@ -5,7 +5,12 @@ import json
 import httpx
 import pytest
 
-from orchestrator.config import Settings
+from orchestrator.config import Settings as _Settings
+
+
+def Settings(**overrides):
+    """Settings with a placeholder endpoint; the provider URL has no default."""
+    return _Settings(**{"llm_base_url": "https://llm.example.invalid/v1", **overrides})
 from orchestrator.llm import HttpLlmClient, LlmBudgetExceeded, LlmUsage, bind_run_counters, json_chat, reset_run_counters
 from orchestrator.run_store import RunCounters
 from orchestrator.usage import UsageLedger, calculate_cost, response_usage
@@ -169,7 +174,7 @@ async def test_transport_failures_are_recorded_and_do_not_invent_output_or_cost(
 async def test_usage_missing_uses_verified_pricing_only_on_the_verified_access_path():
     data = {"choices": [{"message": {"content": "ok"}}]}
     for settings, expected_source in [
-        (Settings(apify_token="test-token"), "pricing"),
+        (Settings(apify_token="test-token", llm_base_url="https://relay.example.invalid/v1"), "pricing"),
         (Settings(llm_provider="openai_compatible", llm_api_key="test-token", llm_base_url="https://other-provider.invalid/v1"), "unknown")]:
         client = HttpLlmClient(settings, transport=httpx.MockTransport(lambda _: httpx.Response(200, json=data)))
         try:
@@ -211,7 +216,7 @@ def test_legacy_sync_call_publishes_usage_even_with_no_running_loop(monkeypatch)
     async def publish(event): emitted.append(event)
     ledger = UsageLedger("run_legacy", publish=publish)
     settings = Settings(llm_provider="openai_compatible", llm_api_key="test-key")
-    monkeypatch.setattr(Settings, "from_env", lambda **kwargs: settings)
+    monkeypatch.setattr(_Settings, "from_env", lambda **kwargs: settings)
     monkeypatch.setattr("orchestrator.llm.requests.post", lambda *args, **kwargs: httpx.Response(200,
         json={"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 15, "cost": .001}}))
     binding = bind_run_counters(RunCounters(), "run_legacy", usage=ledger)

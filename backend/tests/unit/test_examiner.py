@@ -11,7 +11,12 @@ from examiner import Examiner
 from gatekeeper.policy import load_policy
 from gatekeeper.static_analysis import analyze_code
 from gatekeeper.types import ParseFailure
-from orchestrator.config import Settings
+from orchestrator.config import Settings as _Settings
+
+
+def Settings(**overrides):
+    """Settings with a placeholder endpoint; the provider URL has no default."""
+    return _Settings(**{"llm_base_url": "https://llm.example.invalid/v1", **overrides})
 from orchestrator.llm import HttpLlmClient, LlmError, LlmResult
 from tests.fakes import InProcessSandbox
 

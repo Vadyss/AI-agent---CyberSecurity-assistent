@@ -80,7 +80,7 @@ The backend is also published on `http://127.0.0.1:8000` (localhost only).
 |---|---|---|
 | Demo | Mock (scripted, offline) | None |
 | Development stack with sign-in | Mock unless you set `LLM_PROVIDER` | None for the mock |
-| Real model | Any OpenAI-compatible provider (for example OpenRouter), or the bundled Apify relay | `LLM_API_KEY` (with `LLM_BASE_URL` and `LLM_MODEL`) or `APIFY_TOKEN` |
+| Real model | Any OpenAI-compatible provider (for example OpenRouter), or an Apify relay you deploy from `apify/llm-relay` | `LLM_API_KEY` (with `LLM_BASE_URL` and `LLM_MODEL`) or `APIFY_TOKEN` |
 
 The demo always forces the mock model. To try a real model, start the development stack with your provider settings in `.env`, for example:
 
@@ -152,7 +152,7 @@ The evaluation harness is described in [Docs/EVALS.md](Docs/EVALS.md). CI runs l
 - **Approval does not survive a restart.** A run awaiting approval when the backend restarts is closed as failed and must be started again; runs that were executing are retried automatically.
 - **A run awaiting approval blocks its tenant's queue**, because its candidate tools could conflict with a new run's.
 - **Thin evaluation.** The suite has five cases and no recorded baseline from the harness itself ([EVALS.md](Docs/EVALS.md)); a manual series of live runs is summarised in [LLM_PROVIDERS.md](Docs/LLM_PROVIDERS.md).
-- **Default relay URL.** `LLM_BASE_URL` still defaults to the authors' own Apify relay; set your own provider.
+- **No default model endpoint.** `LLM_BASE_URL` must be set for any provider except the mock.
 
 ## Authors
 

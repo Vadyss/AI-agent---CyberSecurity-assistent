@@ -23,7 +23,6 @@ import requests
 
 from gatekeeper.types import ParseFailure
 
-BASE_URL = "https://piquant-peacoat--llm-relay.apify.actor/v1"
 MODEL = "anthropic/claude-sonnet-5.5"
 logger = logging.getLogger(__name__)
 LlmBudget: ContextVar[Any | None] = ContextVar("llm_run_counters", default=None)
@@ -186,7 +185,14 @@ def _capture_usage(ledger, role, model, system, user, response, started, attempt
 
 
 def _priced_access(settings):
-    return settings.llm_provider == "apify" and settings.llm_base_url.rstrip("/") == BASE_URL
+    # Published rates are verified only for models reached through Apify's OpenRouter access.
+    return settings.llm_provider == "apify"
+
+
+def _require_base_url(settings) -> str:
+    if not settings.llm_base_url.strip():
+        raise LlmError("LLM_BASE_URL is not set. Set it to the API prefix of your model provider, for example https://openrouter.ai/api/v1.")
+    return settings.llm_base_url.rstrip("/")
 
 
 async def _safe_publish(ledger, event):
@@ -390,6 +396,7 @@ class HttpLlmClient:
         key = (self.settings.apify_token or self.settings.llm_api_key) if self.settings.llm_provider == "apify" else self.settings.llm_api_key
         if not key:
             raise LlmError("The language model API key is missing.")
+        base_url = _require_base_url(self.settings)
         token_limit = min(max_tokens or self.settings.llm_max_tokens, self.settings.llm_max_tokens_cap)
         payload = {"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                    "max_tokens": token_limit, "temperature": temperature, **_reasoning(self.settings)}
@@ -403,7 +410,7 @@ class HttpLlmClient:
             count_call(self.settings.llm_max_calls_per_run)
             network_attempt += 1
             try:
-                response = await _tracked_post(self._http, self.settings.llm_base_url.rstrip("/") + "/chat/completions",
+                response = await _tracked_post(self._http, base_url + "/chat/completions",
                                                  ledger=LlmUsage.get() or self.usage, role=role, model=model, system=system, user=user,
                                                  attempt=network_attempt, context=context, pricing_allowed=_priced_access(self.settings), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
                 retry = response.status_code == 429 or response.status_code >= 500
@@ -517,6 +524,7 @@ def ask(prompt: str, system: str | None = None, model: str | None = None) -> str
     key = (settings.apify_token or settings.llm_api_key) if settings.llm_provider == "apify" else settings.llm_api_key
     if not key:
         raise LlmError("The language model API key is missing.")
+    base_url = _require_base_url(settings)
     messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
     state = LlmProviderState.get() or ProviderState()
     primary = model or settings.llm_model
@@ -530,7 +538,7 @@ def ask(prompt: str, system: str | None = None, model: str | None = None) -> str
         count_call(settings.llm_max_calls_per_run)
         network_attempt += 1
         try:
-            response = _tracked_sync_post(settings.llm_base_url.rstrip("/") + "/chat/completions",
+            response = _tracked_sync_post(base_url + "/chat/completions",
                                      ledger=ledger, model=model, system=system or "", user=prompt, attempt=network_attempt, pricing_allowed=_priced_access(settings),
                                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                                      json={"model": model, "messages": messages, "max_tokens": token_limit, "temperature": 0.2,

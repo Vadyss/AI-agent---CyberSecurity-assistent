@@ -7,7 +7,7 @@ Toolsmith talks to a language model through one OpenAI-compatible `POST {LLM_BAS
 |---|---|---|
 | `mock` | nothing | The demo, tests and CI. Scripted answers for the sample scenarios; no network. Refused in production. |
 | `openai_compatible` | `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` | Any provider with an OpenAI-style chat completions API, for example OpenRouter. `LLM_BASE_URL` ends at the API prefix (usually `/v1`), not at `/chat/completions`. |
-| `apify` | `APIFY_TOKEN` (or `LLM_API_KEY`) and a reachable relay | The original setup: an [Apify](https://apify.com) Standby Actor (`apify/llm-relay`) that forwards requests to Apify's OpenRouter endpoint. |
+| `apify` | `APIFY_TOKEN` (or `LLM_API_KEY`) and `LLM_BASE_URL` of a relay you deploy | Optional: an [Apify](https://apify.com) Standby Actor (`apify/llm-relay`, see below) that forwards requests to Apify's OpenRouter endpoint. |
 
 ## Using a real model
 
@@ -28,7 +28,7 @@ set -a; . ./.env; set +a                    # llm_smoke.py reads the shell envir
 python backend/scripts/llm_smoke.py         # one planner call; prints the model and token count (needs backend/requirements.txt)
 ```
 
-`LLM_BASE_URL` defaults to the author's own relay Actor. **Replace it** with your relay (below) or another provider; the default is not a public service.
+`LLM_BASE_URL` has no default. Without it (and with a provider other than `mock`) the backend refuses to start with `LLM_BASE_URL is required ...`, and the smoke script reports `LLM_BASE_URL is not set`.
 
 ## Settings that matter
 

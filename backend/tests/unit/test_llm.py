@@ -12,7 +12,12 @@ import pytest
 
 from examiner import Examiner
 from gatekeeper.types import ParseFailure
-from orchestrator.config import Settings
+from orchestrator.config import Settings as _Settings
+
+
+def Settings(**overrides):
+    """Settings with a placeholder endpoint; the provider URL has no default."""
+    return _Settings(**{"llm_base_url": "https://llm.example.invalid/v1", **overrides})
 from orchestrator.llm import (HttpLlmClient, LlmBudgetExceeded, LlmError, LlmResult, ask,
                               bind_run_counters, count_call, extract_json, reset_run_counters, untrusted)
 from orchestrator.llm_mock import scenario_for
@@ -690,3 +695,9 @@ async def test_fallback_is_run_scoped_across_different_clients():
         finally:
             await second.close()
         assert stats.llm_calls == 3 and other_provider.requests[0]["model"] == "fallback-model"
+
+
+async def test_missing_base_url_gives_a_clear_error():
+    client = HttpLlmClient(Settings(llm_provider="openai_compatible", llm_api_key="test-token", llm_base_url=""))
+    with pytest.raises(LlmError, match="LLM_BASE_URL is not set"):
+        await client.chat("planner", "s", "u")
