@@ -37,8 +37,7 @@ body, .sidebar { --fg: var(--text); --line: var(--border); --hover: var(--surfac
 .run-detail input, .run-detail textarea { font-size: 16px; }
 .code-block pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
 body.code-nowrap .code-block pre { white-space: pre; overflow-wrap: normal; }
-body[data-reading-size="large"] .run-detail .run-request,
-body[data-reading-size="large"] .run-summary { font-size: 18px; }
+body[data-reading-size="large"] .run-detail .run-request, body[data-reading-size="large"] .run-summary { font-size: 18px; }
 body[data-reading-size="large"] .run-detail .code-block pre { font-size: 13px; }
 body[data-reading-size="large"] .run-detail .activity-list .text-sm { font-size: 16px; }
 body[data-reading-size="large"] .run-detail .activity-list .text-xs { font-size: 13px; }
@@ -54,9 +53,6 @@ body[data-reading-size="large"] .run-detail .activity-list .text-xs { font-size:
 .nav-item:disabled { opacity: .5; }
 .skills-grid .skill-card footer { flex-wrap: wrap; }
 .workspace-footer { margin-top: auto; }
-.run-context-skills { display: grid; gap: 16px; }
-.run-context-skills strong { display: block; font-size: 14px; }
-.run-context-skills small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
 @media (max-width: 780px) { .desktop-navigation { display: none; } }
 @media (min-width: 781px) { .mobile-navigation[open] { display: none; } }
 @media (max-width: 520px) { .run-heading h1 { font-size: 24px; } .run-tools-note { margin-left: 0; } }
