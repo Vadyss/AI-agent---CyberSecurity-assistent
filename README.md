@@ -56,7 +56,7 @@ You need Docker with Compose v2 and about 2 GB of free disk space for the images
 1. Clone the repository and enter it.
 
    ```bash
-   git clone https://github.com/<owner>/<repository>.git toolsmith
+   git clone https://github.com/Vadyss/Hackathon---From-Dusk-Till-Dawn.git toolsmith
    cd toolsmith
    ```
 
