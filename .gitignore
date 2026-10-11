@@ -50,3 +50,32 @@ tmp/
 
 # Local backups contain tenant data
 backups/
+
+# --- Secrets, databases and generated artifacts (public repository) ---
+# Env files under any name (scripts/dev-up.sh accepts a custom one); .env.example stays tracked.
+*.env
+!.env.example
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+# Local databases and database dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql
+# SBOMs and scan reports from CI or local runs
+sbom/
+*.cdx.json
+*.spdx.json
+*.sarif
+gitleaks-report*.json
+trivy-report*.json
+pip-audit*.json
+# Coverage and Python build outputs
+coverage.xml
+dist/
+build/
+*.egg-info/
