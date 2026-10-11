@@ -11,9 +11,9 @@ from pydantic import ValidationError
 from orchestrator.models import DATA_MODELS, Metrics
 
 
-def test_every_contract_payload_example_is_accepted():
-    text = (Path(__file__).resolve().parents[3] / "Docs" / "kontrakt.md").read_text()
-    section = re.search(r"^## 10\..*?(?=^## 11\.)", text, re.M | re.S).group()
+def test_every_documented_event_payload_example_is_accepted():
+    text = (Path(__file__).resolve().parents[3] / "Docs" / "EVENTS.md").read_text()
+    section = re.search(r"^## 6\..*?(?=^## 7\.)", text, re.M | re.S).group()
     count = 0
     for name, content in re.findall(r"^#### `([^`]+)`(.*?)(?=^#{2,4} |\Z)", section, re.M | re.S):
         for sample in re.findall(r"```json\s*(.*?)\s*```", content, re.S):

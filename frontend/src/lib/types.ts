@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Adam Krúpa and Ondra Csajka. MIT License.
-// Data types per docs/kontrakt.md (chapters 6, 9, 10).
+// Data types per Docs/EVENTS.md (sections 4, 5, 6).
 // Fields marked [untrusted] are always rendered as plain text.
 
 export const CONTRACT_VERSION = 1;

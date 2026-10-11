@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def test_checkout_has_one_documentation_root_and_no_empty_backend_apps():
     docs = [p for p in ROOT.iterdir() if p.is_dir() and p.name.lower() == "docs"]
     assert len(docs) == 1
-    assert (docs[0] / "kontrakt.md").is_file()
+    assert (docs[0] / "EVENTS.md").is_file()
     for package in ("orchestrator", "gatekeeper"):
         assert not (ROOT / "backend" / package / "Dockerfile").exists()
         assert not (ROOT / "backend" / package / "requirements.txt").exists()
