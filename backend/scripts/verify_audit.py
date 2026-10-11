@@ -21,7 +21,10 @@ def main() -> int:
     paths = sorted(args.path.rglob("audit.jsonl")) if args.path.is_dir() else [args.path]
     paths = [path for path in paths if path.is_file() and not path.is_symlink()]
     if not paths:
-        print("No audit file found.", file=sys.stderr)
+        if args.path.is_dir():
+            print("No audit file found; nothing to verify yet.")
+            return 0  # A fresh deployment has no tenant data.
+        print("Audit file not found.", file=sys.stderr)
         return 1
     failed = False
     for path in paths:

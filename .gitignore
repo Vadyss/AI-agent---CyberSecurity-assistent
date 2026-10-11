@@ -47,3 +47,6 @@ tmp/
 
 # CI-only generated secrets
 .ci.env
+
+# Local backups contain tenant data
+backups/
