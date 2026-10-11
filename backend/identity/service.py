@@ -102,12 +102,15 @@ class IdentityService:
             invitation.accepted_at = now
 
     async def _bootstrap_admin(self, session, user: User) -> None:
-        """The configured first administrator gets the first tenant, exactly once."""
+        """The configured first administrator gets the first tenant of an empty installation.
+
+        Only while no tenant exists at all: a tenant deleted later is not silently re-created.
+        """
         if not self.bootstrap_admin_email or user.email != self.bootstrap_admin_email:
             return
-        slug = slugify(self.bootstrap_tenant_name)
-        if (await session.execute(sa.select(Tenant.id).where(Tenant.slug == slug))).first() is not None:
+        if (await session.execute(sa.select(Tenant.id).limit(1))).first() is not None:
             return
+        slug = slugify(self.bootstrap_tenant_name)
         tenant = Tenant(slug=slug, name=self.bootstrap_tenant_name[:200])
         session.add(tenant)
         await session.flush()
@@ -291,6 +294,59 @@ class IdentityService:
             if invitation is None or invitation.tenant_id != tenant_id:
                 raise IdentityError(404, "NOT_FOUND", "Invitation not found.")
             await session.delete(invitation)
+
+    # --- Privacy (GDPR) ------------------------------------------------------
+
+    async def export_user(self, user_id: uuid.UUID) -> dict:
+        """Personal data held about a user: profile, memberships, invitations to their address."""
+        async with self.db.session() as session:
+            user = await session.get(User, user_id)
+            if user is None:
+                raise IdentityError(404, "NOT_FOUND", "User not found.")
+            memberships = (await session.execute(
+                sa.select(Tenant.id, Tenant.slug, Tenant.name, Membership.role, Membership.created_at)
+                .join(Membership, Membership.tenant_id == Tenant.id).where(Membership.user_id == user_id))).all()
+            invitations = [] if not user.email else (await session.execute(
+                sa.select(Invitation.tenant_id, Invitation.role, Invitation.created_at, Invitation.accepted_at)
+                .where(Invitation.email == user.email))).all()
+        iso = lambda value: value.isoformat() if value else None
+        return {"user": {"id": str(user.id), "issuer": user.issuer, "subject": user.subject, "email": user.email,
+                         "email_verified": user.email_verified, "display_name": user.display_name,
+                         "created_at": iso(user.created_at), "last_login_at": iso(user.last_login_at)},
+                "memberships": [{"tenant_id": str(t), "tenant_slug": slug, "tenant_name": name, "role": role,
+                                 "since": iso(since)} for t, slug, name, role, since in memberships],
+                "invitations": [{"tenant_id": str(t), "role": role, "created_at": iso(created),
+                                 "accepted_at": iso(accepted)} for t, role, created, accepted in invitations]}
+
+    async def erase_user(self, user_id: uuid.UUID) -> None:
+        """Remove a user's memberships and personal data; the pseudonymous ID stays in run and audit history."""
+        async with self.db.session() as session:
+            user = await session.get(User, user_id)
+            if user is None:
+                raise IdentityError(404, "NOT_FOUND", "User not found.")
+            memberships = (await session.execute(sa.select(Membership).where(Membership.user_id == user_id))).scalars().all()
+            for membership in memberships:
+                if membership.role == "admin":
+                    admins = (await session.execute(sa.select(sa.func.count()).select_from(Membership).where(
+                        Membership.tenant_id == membership.tenant_id, Membership.role == "admin"))).scalar_one()
+                    if admins <= 1:
+                        raise IdentityError(409, "LAST_ADMIN", "You are the last administrator of a tenant. "
+                                                               "Appoint another administrator or delete the tenant first.")
+            for membership in memberships:
+                await session.delete(membership)
+            if user.email:
+                await session.execute(sa.delete(Invitation).where(Invitation.email == user.email))
+            # Unlink from the identity provider account: a new sign-in creates a new, empty user.
+            user.issuer, user.subject = "erased", uuid.uuid4().hex
+            user.email, user.email_verified, user.display_name, user.last_login_at = None, False, None, None
+
+    async def delete_tenant(self, tenant_id: uuid.UUID) -> None:
+        """Delete the tenant row; memberships, invitations, keys, runs, events and usage cascade."""
+        async with self.db.session() as session:
+            tenant = await session.get(Tenant, tenant_id)
+            if tenant is None:
+                raise IdentityError(404, "NOT_FOUND", "Tenant not found.")
+            await session.delete(tenant)
 
     # --- Helpers -------------------------------------------------------------
 

@@ -71,6 +71,8 @@ class Settings:
     max_queued_runs_per_tenant: int = 10
     run_max_attempts: int = 2
     log_format: str = "json"
+    # Finished runs (with their events and usage rows) older than this are deleted daily; 0 keeps them.
+    run_retention_days: int = 365
     # Prometheus metrics on a separate, unpublished port; 0 disables the endpoint.
     metrics_port: int = 9100
 
@@ -148,6 +150,8 @@ class Settings:
             raise ValueError("OIDC_ISSUER, OIDC_AUDIENCE and OIDC_JWKS_URL are required.")
         if not self.oidc_algorithms or not set(self.oidc_algorithms) <= ASYMMETRIC_ALGORITHMS:
             raise ValueError("OIDC_ALGORITHMS must list asymmetric JWT algorithms only.")
+        if self.run_retention_days < 0:
+            raise ValueError("RUN_RETENTION_DAYS must not be negative.")
         if self.log_format not in {"json", "text"}:
             raise ValueError("LOG_FORMAT must be json or text.")
         if not 0 <= self.metrics_port <= 65535:

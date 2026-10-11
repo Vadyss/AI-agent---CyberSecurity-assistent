@@ -154,6 +154,23 @@ class RunRepository:
             rows = await session.execute(sa.select(Run).where(Run.status.in_(ACTIVE)).order_by(Run.created_at))
             return [RunRecord.of(row) for row in rows.scalars()]
 
+    async def purge_finished_before(self, cutoff: datetime) -> list[tuple[uuid.UUID, str]]:
+        """Delete finished runs created before ``cutoff`` (events and usage rows cascade)."""
+        async with self.db.session() as session:
+            rows = (await session.execute(sa.select(Run.tenant_id, Run.id).where(
+                Run.status.in_(FINISHED), Run.created_at < cutoff))).all()
+            if rows:
+                await session.execute(sa.delete(Run).where(Run.id.in_([run_id for _, run_id in rows])))
+            return [(tenant_id, run_id) for tenant_id, run_id in rows]
+
+    async def runs_created_by(self, actor: str, tenant_ids: list[uuid.UUID]) -> list[RunRecord]:
+        if not tenant_ids:
+            return []
+        async with self.db.session() as session:
+            rows = await session.execute(sa.select(Run).where(Run.created_by == actor, Run.tenant_id.in_(tenant_ids))
+                                         .order_by(Run.created_at))
+            return [RunRecord.of(row) for row in rows.scalars()]
+
     async def claim_next(self, now: datetime | None = None) -> RunRecord | None:
         """Take the oldest due queued run of a tenant with no active run, and mark it running.
 

@@ -221,10 +221,17 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
                     await schedule_retry(record.id, record.tenant_id, record.created_by, record.request,
                                          record.attempt, delay_s=0)
             app.state.dispatcher.start_background()
+            if config.environment != "test" and config.run_retention_days:
+                from orchestrator.privacy_api import retention_loop
+
+                app.state.retention = asyncio.create_task(retention_loop(app, config.run_retention_days))
             yield
         finally:
             if app.state.dispatcher is not None:
                 await app.state.dispatcher.close()
+            if app.state.retention is not None:
+                app.state.retention.cancel()
+                await asyncio.gather(app.state.retention, return_exceptions=True)
             for resource in (app.state.store, app.state.hub, sandbox_client, app.state.voice, app.state.roles):
                 close = getattr(resource, "close", None)
                 if close:
@@ -296,6 +303,7 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
     app.state.sandbox_client = None
     app.state.run_repository = None
     app.state.dispatcher = None
+    app.state.retention = None
     app.state.interrupted = []
     from identity.ratelimit import RateLimiter
 
@@ -593,8 +601,10 @@ def create_app(*, settings=None, gatekeeper=None, sandbox=None, roles=None, pipe
             await app.state.hub.disconnect(subscriber)
 
     from orchestrator.admin_api import build_admin_router
+    from orchestrator.privacy_api import build_privacy_router
 
     router.include_router(build_admin_router(config))
+    router.include_router(build_privacy_router())
     # One mount; ApiPrefixes maps /api/v1 (browsers via oauth2-proxy), /m2m/v1
     # (API-key clients) and the deprecated unversioned paths onto /v1.
     app.include_router(router, prefix="/v1")

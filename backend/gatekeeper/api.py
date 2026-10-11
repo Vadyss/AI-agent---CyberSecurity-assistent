@@ -17,14 +17,15 @@ from .names import require_run_id, violations_unique, valid_name, clip
 from .plan_check import check_plan
 from .policy import load_policy
 from .recipe import check_recipe, display_recipe
-from .registry import IntegrityError, Registry, UsageStore, recipe_sha256
+from .registry import IntegrityError, Registry, UsageStore, erase_tenant_data, recipe_sha256, remove_run_files
 from .sandbox_client import SandboxClient
 from .static_analysis import analyze_code
 from .types import GatekeeperConfig, PlanVerdict, SkillVerdict, Violation
 
 
 # Re-exported for the orchestrator, which may only import this public boundary.
-__all__ = ["AUDIT_ACTOR", "Gatekeeper", "IntegrityError", "SandboxClient", "UsageStore", "load_policy"]
+__all__ = ["AUDIT_ACTOR", "Gatekeeper", "IntegrityError", "SandboxClient", "UsageStore", "erase_tenant_data",
+           "load_policy", "remove_run_files"]
 
 
 class Gatekeeper:

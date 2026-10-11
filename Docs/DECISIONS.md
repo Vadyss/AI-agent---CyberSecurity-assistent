@@ -132,3 +132,12 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Why:** In a public repository that builds and runs generated code, a leaked secret, a vulnerable dependency or a regression in authentication must stop a release automatically.
 - **Exceptions, stated openly:** The frontend image scan and the audit of frontend development dependencies are informational until the frontend team adopts the changes listed in `Docs/FRONTEND_CHANGES.md`. Mypy covers the new platform layers only; older modules join as they gain annotations.
 - **Found and fixed while adding the gates:** Starlette, requests and python-dotenv had known vulnerabilities (fixed in the dependency upgrade commit).
+
+## D-020 Privacy mechanisms (GDPR)
+
+- **Access and portability:** `GET /v1/me/export` returns everything stored about the signed-in person: profile, memberships, invitations to their address and the runs they started.
+- **Erasure:** `DELETE /v1/me` removes memberships and pending invitations and blanks e-mail, name and the link to the provider account; signing in again creates a new, empty identity. Runs and audit records keep only the pseudonymous `user:<id>`, which no longer resolves to a person. The last admin of a tenant must appoint another admin or delete the tenant first.
+- **Tenant deletion:** `DELETE /v1/tenant` (admin, with the tenant slug as confirmation) cancels its runs and deletes all its database rows and files, including its audit chain.
+- **Retention:** finished runs older than `RUN_RETENTION_DAYS` (default 365, 0 keeps them) are deleted daily with their events, usage rows and files.
+- **Bootstrap:** `BOOTSTRAP_ADMIN_EMAIL` now creates a tenant only in an empty installation, so a deleted tenant is not silently re-created (found by the tenant-deletion test).
+- **Trade-off:** Audit chains are kept for the lifetime of the tenant, because deleting single records would break the hash chain; they hold digests and short reasons, not log content.

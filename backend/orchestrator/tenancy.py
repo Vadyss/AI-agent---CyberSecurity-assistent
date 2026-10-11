@@ -22,6 +22,10 @@ class GatekeeperPool:
     def data_dir(self, tenant_id: uuid.UUID | str) -> Path:
         return Path(self.settings.data_dir) / "tenants" / str(uuid.UUID(str(tenant_id)))
 
+    async def forget(self, tenant_id: uuid.UUID | str) -> None:
+        async with self._lock:
+            self._items.pop(str(uuid.UUID(str(tenant_id))), None)
+
     async def get(self, tenant_id: uuid.UUID | str):
         if self.fixed is not None:
             return self.fixed

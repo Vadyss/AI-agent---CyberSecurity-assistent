@@ -445,6 +445,27 @@ class Registry:
             if folder.exists(): shutil.rmtree(folder)
 
 
+def erase_tenant_data(data_dir: Path) -> None:
+    """Delete everything a tenant has on disk: tools, candidates, rules, lessons, usage and audit."""
+    root = Path(data_dir)
+    if root.is_symlink():
+        raise IntegrityError("A tenant data directory must not be a symbolic link.")
+    if root.exists():
+        shutil.rmtree(root)
+
+
+def remove_run_files(data_dir: Path, run_ids: list[str]) -> int:
+    """Delete per-run files (usage records) of runs removed by the retention policy."""
+    removed = 0
+    runs = Path(data_dir) / "runs"
+    for run_id in run_ids:
+        folder = safe_join(runs, require_run_id(run_id))
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder)
+            removed += 1
+    return removed
+
+
 class UsageStore:
     """Atomic metadata snapshots; never modifies skills, recipes or audit records."""
     def __init__(self, data_dir: Path, run_id: str):

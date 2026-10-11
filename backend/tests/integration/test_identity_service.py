@@ -42,6 +42,16 @@ async def test_bootstrap_admin_gets_the_first_tenant_once(service):
     assert error.value.code == "NO_TENANT"
 
 
+async def test_bootstrap_only_applies_to_an_empty_installation(service):
+    service.signup_mode = "self_service"
+    early = await service.sync_user(ISSUER, claims("early"))
+    await service.create_tenant("Early Bird", early)
+    founder = await service.sync_user(ISSUER, claims("founder", email="founder@example.test"))
+    with pytest.raises(IdentityError) as error:
+        await service.principal_for_user(founder, None)
+    assert error.value.code == "NO_TENANT"
+
+
 async def test_bootstrap_needs_a_verified_email(service):
     unverified = await service.sync_user(ISSUER, claims("founder", email="founder@example.test", verified=False))
     with pytest.raises(IdentityError) as error:

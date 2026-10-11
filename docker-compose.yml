@@ -151,6 +151,7 @@ services:
       MAX_QUEUED_RUNS_PER_TENANT: "${MAX_QUEUED_RUNS_PER_TENANT:-}"
       RUN_MAX_ATTEMPTS: "${RUN_MAX_ATTEMPTS:-}"
       LOG_FORMAT: "${LOG_FORMAT:-json}"
+      RUN_RETENTION_DAYS: "${RUN_RETENTION_DAYS:-}"
       # Prometheus metrics on port 9100 inside the Docker network only (not published).
       METRICS_PORT: "${METRICS_PORT:-9100}"
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
