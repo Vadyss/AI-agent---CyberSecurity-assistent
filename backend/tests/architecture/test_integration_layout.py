@@ -17,19 +17,16 @@ def test_checkout_has_one_documentation_root_and_no_empty_backend_apps():
     assert not (ROOT / "backend/gatekeeper/main.py").exists()
 
 
-def test_ci_keeps_all_test_suites_and_never_deletes_deployment_volumes():
+def test_ci_keeps_all_test_suites():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    assert {"test", "frontend-test", "integration", "deploy"} <= workflow["jobs"].keys()
+    assert {"test", "frontend-test", "integration"} <= workflow["jobs"].keys()
+    assert "deploy" not in workflow["jobs"]
     suites = str(workflow["jobs"]["test"])
     # Backend and sandbox suites run through the shared Docker test script.
     assert "sh backend/scripts/test.sh" in suites
     script = (ROOT / "backend/scripts/test.sh").read_text()
     assert "../sandbox/requirements.txt" in script and "../sandbox/tests" in script
     assert "apify/llm-relay" in suites and "pytest tests" in suites
-    deploy = str(workflow["jobs"]["deploy"])
-    assert "down -v" not in deploy and "--volumes" not in deploy
-    for check in ("APIFY_TOKEN", "http://1.1.1.1", "touch /app/test", "/health"):
-        assert check in deploy
     assert "npm test" in str(workflow["jobs"]["frontend-test"])
     integration = str(workflow["jobs"]["integration"])
     assert "--base http://localhost:13000" in integration

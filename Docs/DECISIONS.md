@@ -52,7 +52,7 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 - **Decision:** `ENVIRONMENT` is `production` unless set otherwise, and `AUTH_MODE` is `oidc`. In production the backend refuses to start without a PostgreSQL `DATABASE_URL`, complete OIDC settings, an HTTPS issuer and a real model provider. `AUTH_MODE=disabled` (one local tenant, local admin) is allowed only in `development` and `test`. The demo overlay uses it, and it must never be exposed beyond localhost.
 - **Why:** A forgotten variable must produce a server that does not start, not one that runs without authentication.
 - **Implementation:** The app is created by `uvicorn orchestrator.main:create_app --factory`, so configuration is validated at startup instead of at import. Migrations run in a one-shot `migrate` service before the backend starts. `POSTGRES_PASSWORD` has no default.
-- **Trade-off:** The `deploy` job on `main` now needs `POSTGRES_PASSWORD` (secret) and the `OIDC_*` variables configured in GitHub before it can start the stack.
+- **Trade-off:** Anyone deploying must supply `POSTGRES_PASSWORD` and the `OIDC_*` settings; the repository ships no deployment job.
 
 ## D-009 Identity comes only from a verified provider token
 
@@ -128,7 +128,7 @@ Each entry states the decision, the reason, and the trade-off we accept. Newest 
 
 ## D-019 Quality and supply-chain gates in CI
 
-- **Decision:** Deployment from `main` requires these jobs to pass: `lint` (ruff for defects; mypy for the platform modules), `security` (gitleaks over the full history, pip-audit of the hash-pinned locks and the relay, npm audit of the frontend's production dependencies), `test` (backend and sandbox in the production base image, against SQLite and PostgreSQL), `images` (trivy fails on fixable HIGH/CRITICAL vulnerabilities in the backend and sandbox images; CycloneDX SBOMs of all three images are kept as build artifacts), `frontend-test`, `integration` and `auth-integration`.
+- **Decision:** CI runs these jobs on every push and pull request to `main`; all must pass before merging: `lint` (ruff for defects; mypy for the platform modules), `security` (gitleaks over the full history, pip-audit of the hash-pinned locks and the relay, npm audit of the frontend's production dependencies), `test` (backend and sandbox in the production base image, against SQLite and PostgreSQL), `images` (trivy fails on fixable HIGH/CRITICAL vulnerabilities in the backend and sandbox images; CycloneDX SBOMs of all three images are kept as build artifacts), `frontend-test`, `integration` and `auth-integration`.
 - **Why:** In a public repository that builds and runs generated code, a leaked secret, a vulnerable dependency or a regression in authentication must stop a release automatically.
 - **Exceptions, stated openly:** The frontend image scan and the audit of frontend development dependencies are informational until the frontend team adopts the changes listed in `Docs/FRONTEND_CHANGES.md`. Mypy covers the new platform layers only; older modules join as they gain annotations.
 - **Found and fixed while adding the gates:** Starlette, requests and python-dotenv had known vulnerabilities (fixed in the dependency upgrade commit).

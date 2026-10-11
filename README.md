@@ -139,7 +139,7 @@ cd frontend && npm ci && npm test     # frontend tests
 ruff check backend sandbox apify scripts && (cd backend && mypy)   # versions are pinned in CI
 ```
 
-The evaluation harness is described in [Docs/EVALS.md](Docs/EVALS.md). CI runs lint, secret scanning, dependency and image scans, SBOM generation, all test suites, an isolated Docker integration test and a sign-in chain test. Its `deploy` job targets the authors' own self-hosted runner; adapt or remove it for a fork.
+The evaluation harness is described in [Docs/EVALS.md](Docs/EVALS.md). CI runs lint, secret scanning, dependency and image scans, SBOM generation, all test suites, an isolated Docker integration test and a sign-in chain test. The repository has no deployment job; deploy as described in the operations guide.
 
 **Production:** follow the [operations guide](Docs/OPERATIONS.md): register an OIDC client, fill `.env`, then `docker compose up --build -d --wait` behind a TLS reverse proxy. The backend refuses to start with an incomplete or unsafe configuration.
 
