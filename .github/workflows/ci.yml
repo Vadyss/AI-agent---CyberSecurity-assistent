@@ -25,6 +25,68 @@ jobs:
         working-directory: backend
         run: mypy
 
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan of the full history (gitleaks)
+        run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --log-opts="--all" --redact --exit-code 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python dependency audit (pip-audit)
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r backend/requirements.lock --require-hashes --disable-pip --progress-spinner off
+          pip-audit -r sandbox/requirements.lock --require-hashes --disable-pip --progress-spinner off
+          pip-audit -r apify/llm-relay/requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend production dependency audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Frontend development dependency audit (informational)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build --build-arg APP_VERSION=${{ github.sha }} -t toolsmith-backend:ci backend
+          docker build -t toolsmith-sandbox:ci sandbox
+          docker build -t toolsmith-frontend:ci frontend
+      - name: Container vulnerability scan (trivy, fixable HIGH and CRITICAL fail the build)
+        run: |
+          for image in toolsmith-backend:ci toolsmith-sandbox:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image \
+              --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
+      # Informational until the frontend Dockerfile adopts Docs/FRONTEND_CHANGES.md (F-8).
+      - name: Container vulnerability scan of the frontend image (informational)
+        continue-on-error: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image \
+            --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 toolsmith-frontend:ci
+      - name: Software bill of materials (CycloneDX)
+        run: |
+          mkdir -p sbom
+          for name in backend sandbox frontend; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/sbom":/out aquasec/trivy:0.75.0 image \
+              --quiet --format cyclonedx --output "/out/$name.cdx.json" "toolsmith-$name:ci"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -131,7 +193,7 @@ jobs:
         run: docker compose --env-file .ci.env -p toolsmith-dev -f docker-compose.yml -f docker-compose.dev.yml down -v
 
   deploy:
-    needs: [lint, test, frontend-test, integration, auth-integration]
+    needs: [lint, security, test, images, frontend-test, integration, auth-integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, ARM64]
     steps:
